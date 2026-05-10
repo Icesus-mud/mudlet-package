@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.3.4 — 2026-05-10
+
+Bottom-strip rework after the v0.3.3 screenshot showed flat, overly tall
+HP/SP/EP blocks dominating the screen and the exits row sitting in the
+wrong place.
+
+- **Vitals row moved above the exits row.** Reading order now goes
+  console → vitals → location → input. The exits/SAFE strip sits
+  directly above Mudlet's command line, the gauges sit just above the
+  exits, and the bottom border shrunk from 94 px to 60 px (vitals 32
+  + exits 24 + 4 px gap).
+- **Slim, glassy gauges.** HP/SP/EP/PSP redesigned: height halved
+  (58 → 32 px), vertical gradient (lighter top, darker bottom) instead
+  of v0.3.3's flat horizontal block, 5 px corner radius, dark inner
+  border for depth. Reads as a soft pill rather than a solid colour
+  field. Less screen real estate, less garish, easier on the eye.
+- **Cast bar unchanged.** Stays horizontal (gradient direction matches
+  fill direction for progress) — only the vitals adopted the vertical
+  glass treatment.
+- **HP critical pulse + lazy PSP gauge** now use the same vertical
+  style so the pulse doesn't flatten the bar back to v0.3.3 chrome,
+  and PSP appears in the same slim shape when it lights up.
+
 ## v0.3.3 — 2026-05-10
 
 Real fix for the "fonts still tiny" problem from v0.3.2 — and the

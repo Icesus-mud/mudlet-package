@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "0.3.3"
+icesus.version = "0.3.4"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -40,7 +40,10 @@ if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
 icesus.config = {
   borderTop    = 92,     -- banner: identity + EXP (px)
   borderRight  = 360,    -- right column width (px)
-  borderBottom = 94,     -- location strip (28) + vitals (58) + gaps (px)
+  -- Bottom strip, top → bottom: vitals gauges (32) → exits row (24) →
+  -- (Mudlet's command line sits below borderBottom). Slimmer than v0.3.3
+  -- so the bars stay legible without dominating the screen.
+  borderBottom = 60,     -- vitals (32) + exits (24) + 4 px gap (px)
   channelLines = 500,
   channelTimes = true,
   -- EXP bar grows with the window but never sprawls past expMaxW so
@@ -195,6 +198,16 @@ local function lg(c1, c2)
     "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 %s, stop:1 %s)", c1, c2)
 end
 
+-- Qt linear-gradient string for a vertical "glassy" fill: lighter colour
+-- at the top fading to darker at the bottom. The middle stop holds the
+-- top tint a touch longer so the bar reads as a soft-shadowed pill rather
+-- than a plain colour ramp. Used by the slim vitals gauges.
+local function lgv(top, bot)
+  return string.format(
+    "qlineargradient(x1:0, y1:0, x2:0, y2:1, " ..
+    "stop:0 %s, stop:0.45 %s, stop:1 %s)", top, top, bot)
+end
+
 -- =============================================================
 -- HUD construction.
 -- =============================================================
@@ -309,16 +322,29 @@ function icesus.setupHUD()
 
   -- =====================================================================
   -- BOTTOM BAR — two strips, both anchored to the absolute bottom.
-  --   y = -72 .. -50  : location + exits row
-  --   y = -46 .. 0    : vitals (HP / SP / EP, +PSP if max>0)
+  --   y = -B  .. -B+VITALS_H : vitals (HP / SP / EP, +PSP if max>0)
+  --   y = -LOC_H .. 0        : location + exits, just above the command
+  --                            line (Mudlet renders that below borderBottom).
+  -- v0.3.4: gauges sit ABOVE the exits row (was below) — eyes drop from
+  -- world view → vitals → location → input, in reading order.
   -- The right column ends at -B, so this strip sits left of it.
   -- =====================================================================
-  local LOC_H    = 28
-  local VITALS_H = 58
+  local LOC_H    = 24
+  local VITALS_H = 32
 
+  -- Vitals row at the TOP of the bottom border (closest to the console).
+  icesus.hud.bottom = Geyser.HBox:new({
+    name = "icesus.bottom",
+    x = 0, y = "-" .. B,
+    width = "100%-" .. R,
+    height = VITALS_H,
+  })
+
+  -- Exits/location row at the BOTTOM of the bottom border (just above
+  -- Mudlet's command field).
   icesus.hud.locationLabel = Geyser.Label:new({
     name = "icesus.locationLabel",
-    x = 0, y = "-" .. (VITALS_H + LOC_H + 4),
+    x = 0, y = "-" .. LOC_H,
     width = "100%-" .. R,
     height = LOC_H,
   })
@@ -327,43 +353,38 @@ function icesus.setupHUD()
     color: %s;
     border-top: 1px solid %s;
     font-family: %s;
-    font-size: 14pt;
+    font-size: 12pt;
     qproperty-alignment: 'AlignVCenter';
     padding: 0 14px;
   ]], P.bgPanel, P.text, P.border, FS))
-  pcall(function() icesus.hud.locationLabel:setFontSize(11) end)
+  pcall(function() icesus.hud.locationLabel:setFontSize(10) end)
   icesus.hud.locationLabel:echo([[<span style="color:#555">—</span>]])
 
-  icesus.hud.bottom = Geyser.HBox:new({
-    name = "icesus.bottom",
-    x = 0, y = "-" .. VITALS_H,
-    width = "100%-" .. R,
-    height = VITALS_H,
-  })
-
+  -- Slim vertical-gradient gauges. Vertical fill (top brighter, bottom
+  -- darker) reads as a soft-shadowed pill instead of v0.3.3's flat block.
+  -- Border tone matches the panel chrome elsewhere on the HUD.
   local function makeGauge(key, label, grad)
     local g = Geyser.Gauge:new({ name = "icesus." .. key }, icesus.hud.bottom)
     g.front:setStyleSheet(string.format([[
       background: %s;
-      border: 1px solid #0a0c18;
-      border-radius: 3px;
-    ]], lg(grad[1], grad[2])))
+      border: 1px solid rgba(0,0,0,0.45);
+      border-radius: 5px;
+    ]], lgv(grad[2], grad[1])))
     g.back:setStyleSheet(string.format([[
-      background: #0a0c18;
+      background: %s;
       border: 1px solid %s;
-      border-radius: 3px;
-    ]], P.border))
+      border-radius: 5px;
+    ]], P.bgInput, P.border))
     g.text:setStyleSheet(string.format([[
       color: %s;
       font-family: %s;
-      font-size: 17pt;
-      font-weight: 700;
-      letter-spacing: 0.5px;
+      font-size: 11pt;
+      font-weight: 600;
       qproperty-alignment: 'AlignCenter';
     ]], P.textBright, FS))
-    -- 12pt fits "HP 142/200" inside a ~95 px gauge slot at this build's
-    -- effective DPI; 14 clipped the trailing digits.
-    pcall(function() g.text:setFontSize(12) end)
+    -- 10pt fits "HP 142/200" inside a ~95 px gauge slot at this build's
+    -- effective DPI when the gauge is only 32 px tall.
+    pcall(function() g.text:setFontSize(10) end)
     g:setValue(0, 1, label)
     return g
   end
@@ -538,6 +559,8 @@ end
 -- =============================================================
 -- Render.
 -- =============================================================
+-- Horizontal gradient — for the cast bar where the fill direction (L→R
+-- progress) and the gradient direction are the same.
 local function setGaugeGrad(g, grad)
   if not g then return end
   g.front:setStyleSheet(string.format([[
@@ -545,6 +568,17 @@ local function setGaugeGrad(g, grad)
     border: 1px solid #0a0c18;
     border-radius: 3px;
   ]], lg(grad[1], grad[2])))
+end
+
+-- Vertical gradient — for the slim vitals gauges. Top brighter, bottom
+-- darker, so the bar reads as a soft pill independent of fill level.
+local function setGaugeGradV(g, grad)
+  if not g then return end
+  g.front:setStyleSheet(string.format([[
+    background: %s;
+    border: 1px solid rgba(0,0,0,0.45);
+    border-radius: 5px;
+  ]], lgv(grad[2], grad[1])))
 end
 
 function icesus.refreshGauges()
@@ -571,28 +605,32 @@ function icesus.refreshGauges()
   elseif (not critical) and icesus.state.hpCritical then
     icesus.state.hpCritical = false
     icesus.stopHpPulse()
-    setGaugeGrad(icesus.hud.hp, P.hpGrad)
+    setGaugeGradV(icesus.hud.hp, P.hpGrad)
   end
 
   -- PSP: lazy-create when max becomes positive; tear down when it drops.
+  -- Style mirrors the slim vertical-gradient vitals built in setupHUD().
   if s.pspmax > 0 then
     if not icesus.hud.psp then
       icesus.hud.psp = Geyser.Gauge:new({ name = "icesus.psp" }, icesus.hud.bottom)
       icesus.hud.psp.front:setStyleSheet(string.format([[
-        background: %s; border: 1px solid #0a0c18; border-radius: 3px;
-      ]], lg(P.pspGrad[1], P.pspGrad[2])))
+        background: %s;
+        border: 1px solid rgba(0,0,0,0.45);
+        border-radius: 5px;
+      ]], lgv(P.pspGrad[2], P.pspGrad[1])))
       icesus.hud.psp.back:setStyleSheet(string.format([[
-        background: #0a0c18; border: 1px solid %s; border-radius: 3px;
-      ]], P.border))
+        background: %s;
+        border: 1px solid %s;
+        border-radius: 5px;
+      ]], P.bgInput, P.border))
       icesus.hud.psp.text:setStyleSheet(string.format([[
         color: %s;
         font-family: %s;
-        font-size: 17pt;
-        font-weight: 700;
-        letter-spacing: 0.5px;
+        font-size: 11pt;
+        font-weight: 600;
         qproperty-alignment: 'AlignCenter';
       ]], P.textBright, icesus.fontStack))
-      pcall(function() icesus.hud.psp.text:setFontSize(12) end)
+      pcall(function() icesus.hud.psp.text:setFontSize(10) end)
     end
     setG(icesus.hud.psp, s.psp, s.pspmax, "PSP")
   end
@@ -606,9 +644,9 @@ function icesus.startHpPulse()
     icesus.state.pulseOn = not icesus.state.pulseOn
     local P = icesus.palette
     if icesus.state.pulseOn then
-      setGaugeGrad(icesus.hud.hp, P.hpGradC)
+      setGaugeGradV(icesus.hud.hp, P.hpGradC)
     else
-      setGaugeGrad(icesus.hud.hp, P.hpGrad)
+      setGaugeGradV(icesus.hud.hp, P.hpGrad)
     end
   end, true)
 end
