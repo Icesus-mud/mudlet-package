@@ -1,5 +1,15 @@
 [
   {
+    "delay_ms": 150,
+    "package": "Char.Base",
+    "payload": {
+      "name":  "Idles",
+      "title": "the wandering frostmage",
+      "race":  "Half-Elf",
+      "guild": "Wizards"
+    }
+  },
+  {
     "delay_ms": 200,
     "package": "Char.Maxstats",
     "payload": {
@@ -47,6 +57,17 @@
       ],
       "momentum":         "berserk",
       "special_momentum": "execute"
+    }
+  },
+  {
+    "delay_ms": 100,
+    "package": "Char.Cooldowns",
+    "payload": {
+      "cooldowns": [
+        { "name": "berserk",       "remaining": 28, "total": 30  },
+        { "name": "execute",       "remaining": 12, "total": 30  },
+        { "name": "breath weapon", "remaining": 90, "total": 300 }
+      ]
     }
   },
   {

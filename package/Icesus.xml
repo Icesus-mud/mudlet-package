@@ -17,15 +17,19 @@
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v0.2.2  •  https://github.com/Icesus-mud/mudlet-package
+-- v0.3.0  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
 -- and a fresh one installed, so editing this script and saving in
 -- Mudlet's IDE replaces the running HUD cleanly.
+--
+-- Visual language ported from the play.icesus.org web client
+-- (Icesus-mud/webclient, css/style.css). Colour tokens live in
+-- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "0.2.2"
+icesus.version = "0.3.0"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -34,26 +38,95 @@ if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
 -- Config — tweak in your private session, or PR upstream defaults.
 -- =============================================================
 icesus.config = {
+  borderTop    = 60,     -- banner: identity + EXP (px)
   borderRight  = 320,    -- right column width (px)
-  borderBottom = 36,     -- vitals row height (px)
+  borderBottom = 40,     -- vitals row height (px)
   channelLines = 500,
   channelTimes = true,
 }
 
 -- =============================================================
+-- Palette — ported from webclient/css/style.css :root tokens.
+-- =============================================================
+icesus.palette = {
+  bgDeep   = "#0c0e1a",
+  bgMain   = "#131629",
+  bgPanel  = "#1a1e35",
+  bgInput  = "#0f1225",
+  border   = "#2a2f4e",
+  borderBright = "#3a3f5e",
+  text     = "#c8cdd8",
+  textDim  = "#8b90a5",
+  textBright = "#eef0f6",
+  ice      = "#7dd3fc",
+  iceBright = "#bae6fd",
+  iceGlow  = "rgba(125,211,252,0.25)",
+  green    = "#3ddc84",
+  red      = "#f87171",
+  amber    = "#fbbf24",
+  cyan     = "#38bdf8",
+  -- Gauge gradients (start, end). Match webclient .gauge-fill.* rules.
+  -- Cold-pass: cooler stops across the board so the HUD reads as a
+  -- frosted dashboard, not a candy-coloured one. HP / SP stay vivid
+  -- because alarm and mana are meant to grab the eye; EXP / PSP / cast
+  -- got pulled toward forest / muted violet / glacier cyan respectively.
+  hpGrad   = { "#8b1a1a", "#dc2626" },
+  hpGradC  = { "#7f1d1d", "#b91c1c" },  -- critical
+  spGrad   = { "#1e3a8a", "#3b82f6" },
+  epGrad   = { "#7c5314", "#b45309" },  -- darker amber, less highlighter
+  pspGrad  = { "#5b1a8b", "#9333ea" },  -- one notch off neon
+  expGrad  = { "#14532d", "#16a34a" },  -- forest, not lime
+  castGrad = { "#0e7490", "#22d3ee" },  -- glacier cyan, not arcane purple
+}
+
+icesus.fontStack = '"JetBrains Mono", "DejaVu Sans Mono", "Courier New", monospace'
+
+-- =============================================================
+-- Effect badge styling — mirrors webclient .effect-* CSS classes.
+-- Unknown effects fall back to the neutral "default" entry.
+-- =============================================================
+icesus.effectStyles = {
+  ["bleeding"]       = { fg = "#f87171", bg = "rgba(248,113,113,0.18)", bd = "rgba(248,113,113,0.40)" },
+  ["stunned"]        = { fg = "#fbbf24", bg = "rgba(251,191,36,0.18)",  bd = "rgba(251,191,36,0.40)" },
+  ["poisoned"]       = { fg = "#4ade80", bg = "rgba(74,222,128,0.18)",  bd = "rgba(74,222,128,0.40)" },
+  ["burning"]        = { fg = "#fb923c", bg = "rgba(251,146,60,0.18)",  bd = "rgba(251,146,60,0.40)" },
+  ["death-sickness"] = { fg = "#a78bfa", bg = "rgba(167,139,250,0.18)", bd = "rgba(167,139,250,0.40)" },
+  ["death sickness"] = { fg = "#a78bfa", bg = "rgba(167,139,250,0.18)", bd = "rgba(167,139,250,0.40)" },
+  ["frozen"]         = { fg = "#7dd3fc", bg = "rgba(125,211,252,0.18)", bd = "rgba(125,211,252,0.40)" },
+  ["chilled"]        = { fg = "#bae6fd", bg = "rgba(186,230,253,0.18)", bd = "rgba(186,230,253,0.40)" },
+  ["blessed"]        = { fg = "#fde047", bg = "rgba(253,224,71,0.18)",  bd = "rgba(253,224,71,0.40)" },
+  ["cursed"]         = { fg = "#c084fc", bg = "rgba(192,132,252,0.18)", bd = "rgba(192,132,252,0.40)" },
+  default            = { fg = "#cbd5e1", bg = "rgba(148,163,184,0.15)", bd = "rgba(148,163,184,0.30)" },
+}
+
+local function effectStyle(name)
+  local key = tostring(name or ""):lower()
+  return icesus.effectStyles[key] or icesus.effectStyles.default
+end
+
+-- =============================================================
 -- Internal state.
 -- =============================================================
 icesus.state = {
-  vitals          = { hp=0, hpmax=0, sp=0, spmax=0, ep=0, epmax=0 },
+  vitals          = { hp=0, hpmax=0, sp=0, spmax=0, ep=0, epmax=0,
+                      psp=0, pspmax=0 },
+  identity        = { name="", title="", race="", guild="", level=0 },
+  exp             = { exp=0, tnl=0 },
+  carry           = { money=0, bank=0, dfavor=0,
+                      wt=0, wtmax=0, vol=0, volmax=0 },
   enemies         = {},
   effects         = {},
+  cooldowns       = {},     -- { { name, remaining, total }, ... }
   momentum        = "",
   specialMomentum = "",
   casting         = nil,    -- { spell, progress, cps } when active
   inCombat        = false,
+  hpCritical      = false,  -- drives pulse timer
+  pulseOn         = false,  -- toggled by tempTimer
 }
 icesus.hud      = nil
 icesus.handlers = {}
+icesus.timers   = {}
 
 -- =============================================================
 -- Shape buckets — must match adm/daemons/gmcp_d.c:411-427.
@@ -66,6 +139,23 @@ icesus.shapeColors = {
   [30]  = "#ef4444", [20] = "#dc2626", [10] = "#b91c1c", [5]  = "#7f1d1d",
 }
 
+-- Enemy bar gradients — mirrors webclient .enemy-fill.* classes for a
+-- two-tone fill that reads well at small sizes.
+icesus.enemyGrads = {
+  [100] = { "#166534", "#22c55e" },
+  [99]  = { "#166534", "#4ade80" },
+  [90]  = { "#4d7c0f", "#a3e635" },
+  [80]  = { "#4d7c0f", "#a3e635" },
+  [70]  = { "#854d0e", "#eab308" },
+  [60]  = { "#854d0e", "#d97706" },
+  [50]  = { "#9a3412", "#f97316" },
+  [40]  = { "#9a3412", "#f97316" },
+  [30]  = { "#991b1b", "#ef4444" },
+  [20]  = { "#991b1b", "#ef4444" },
+  [10]  = { "#7f1d1d", "#dc2626" },
+  [5]   = { "#7f1d1d", "#b91c1c" },
+}
+
 local function shapeColor(pct)
   for _, b in ipairs({100, 99, 90, 80, 70, 60, 50, 40, 30, 20, 10, 5}) do
     if pct >= b then return icesus.shapeColors[b] end
@@ -73,9 +163,31 @@ local function shapeColor(pct)
   return icesus.shapeColors[5]
 end
 
+local function enemyGrad(pct)
+  for _, b in ipairs({100, 99, 90, 80, 70, 60, 50, 40, 30, 20, 10, 5}) do
+    if pct >= b then return icesus.enemyGrads[b] end
+  end
+  return icesus.enemyGrads[5]
+end
+
 local function htmlEscape(s)
   return (tostring(s or ""):gsub("[<>&]",
     { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;" }))
+end
+
+local function shortAmount(n)
+  -- Compact human-readable money / EXP. Matches webclient feel.
+  n = tonumber(n) or 0
+  if n >= 1e9 then return string.format("%.1fb", n / 1e9)
+  elseif n >= 1e6 then return string.format("%.1fm", n / 1e6)
+  elseif n >= 1e3 then return string.format("%.1fk", n / 1e3)
+  else return tostring(n) end
+end
+
+-- Qt linear-gradient string for a horizontal two-tone fill.
+local function lg(c1, c2)
+  return string.format(
+    "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 %s, stop:1 %s)", c1, c2)
 end
 
 -- =============================================================
@@ -85,13 +197,101 @@ function icesus.setupHUD()
   if icesus.hud then return end
   icesus.hud = {}
 
+  local P  = icesus.palette
+  local FS = icesus.fontStack
+
+  local T = icesus.config.borderTop
   local R = icesus.config.borderRight
   local B = icesus.config.borderBottom
 
+  setBorderTop(T)
   setBorderRight(R)
   setBorderBottom(B)
 
-  -- ----- bottom: vitals gauges (don't extend under the right column) -----
+  -- =====================================================================
+  -- TOP BANNER — full-window strip above the main console.
+  --   Row 1: identity (name + class/race/guild) on left,
+  --          carry summary (money / DF / weight%) on right.
+  --   Row 2: EXP gauge spanning the full width.
+  -- =====================================================================
+  icesus.hud.banner = Geyser.Container:new({
+    name = "icesus.banner",
+    x = 0, y = 0,
+    width = "100%", height = T,
+  })
+  -- Geyser.Container has no Qt widget of its own; lay a full-bleed Label
+  -- inside it for the gradient backdrop and the bottom ice-glow border.
+  icesus.hud.bannerBg = Geyser.Label:new({
+    name = "icesus.bannerBg",
+    x = 0, y = 0, width = "100%", height = T,
+  }, icesus.hud.banner)
+  icesus.hud.bannerBg:setStyleSheet([[
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #0f1a2e, stop:1 #0c1424);
+    border: none;
+    border-bottom: 1px solid #1a3050;
+  ]])
+
+  local PAD_H = 14
+  local idH   = 24
+  local expH  = 22
+
+  -- Identity (left half of banner row 1).
+  icesus.hud.identityLabel = Geyser.Label:new({
+    name = "icesus.identityLabel",
+    x = PAD_H, y = 6, width = "60%-" .. (PAD_H * 2), height = idH,
+  }, icesus.hud.banner)
+  icesus.hud.identityLabel:setStyleSheet(string.format([[
+    background: transparent;
+    color: %s;
+    font-family: %s;
+    font-size: 11pt;
+    qproperty-alignment: 'AlignLeft | AlignVCenter';
+    padding: 0;
+  ]], P.text, FS))
+
+  -- Carry summary (right half of banner row 1).
+  icesus.hud.carryLabel = Geyser.Label:new({
+    name = "icesus.carryLabel",
+    x = "60%", y = 6, width = "40%-" .. PAD_H, height = idH,
+  }, icesus.hud.banner)
+  icesus.hud.carryLabel:setStyleSheet(string.format([[
+    background: transparent;
+    color: %s;
+    font-family: %s;
+    font-size: 10pt;
+    qproperty-alignment: 'AlignRight | AlignVCenter';
+    padding: 0;
+  ]], P.textDim, FS))
+
+  -- EXP gauge (banner row 2). Geyser.Gauge with green gradient.
+  icesus.hud.expGauge = Geyser.Gauge:new({
+    name = "icesus.expGauge",
+    x = PAD_H, y = 6 + idH + 2, width = "100%-" .. (PAD_H * 2), height = expH,
+  }, icesus.hud.banner)
+  icesus.hud.expGauge.front:setStyleSheet(string.format([[
+    background: %s;
+    border: 1px solid #0a0c18;
+    border-radius: 3px;
+  ]], lg(P.expGrad[1], P.expGrad[2])))
+  icesus.hud.expGauge.back:setStyleSheet(string.format([[
+    background: #0a0c18;
+    border: 1px solid %s;
+    border-radius: 3px;
+  ]], P.border))
+  icesus.hud.expGauge.text:setStyleSheet(string.format([[
+    color: %s;
+    font-family: %s;
+    font-size: 9pt;
+    font-weight: 600;
+    qproperty-alignment: 'AlignCenter';
+  ]], P.textBright, FS))
+  icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
+
+  -- =====================================================================
+  -- BOTTOM BAR — vitals (HP / SP / EP, +PSP if max>0).
+  -- HBox with up-to-four gauges; layout adapts when PSP appears.
+  -- =====================================================================
   icesus.hud.bottom = Geyser.HBox:new({
     name = "icesus.bottom",
     x = 0, y = "-" .. B,
@@ -99,74 +299,93 @@ function icesus.setupHUD()
     height = B,
   })
 
-  local function makeGauge(key, label, fill)
+  local function makeGauge(key, label, grad)
     local g = Geyser.Gauge:new({ name = "icesus." .. key }, icesus.hud.bottom)
-    g.front:setStyleSheet(string.format(
-      "background-color: %s; border: 1px solid #111; border-radius: 2px;", fill))
-    g.back:setStyleSheet(
-      "background-color: #1a1a1a; border: 1px solid #111; border-radius: 2px;")
-    g.text:setStyleSheet([[
-      color: #fff;
-      font-family: "DejaVu Sans Mono", monospace;
+    g.front:setStyleSheet(string.format([[
+      background: %s;
+      border: 1px solid #0a0c18;
+      border-radius: 3px;
+    ]], lg(grad[1], grad[2])))
+    g.back:setStyleSheet(string.format([[
+      background: #0a0c18;
+      border: 1px solid %s;
+      border-radius: 3px;
+    ]], P.border))
+    g.text:setStyleSheet(string.format([[
+      color: %s;
+      font-family: %s;
       font-size: 10pt;
+      font-weight: 600;
+      letter-spacing: 0.5px;
       qproperty-alignment: 'AlignCenter';
-    ]])
+    ]], P.textBright, FS))
     g:setValue(0, 1, label)
     return g
   end
 
-  icesus.hud.hp = makeGauge("hp", "HP", "#16a34a")
-  icesus.hud.sp = makeGauge("sp", "SP", "#2563eb")
-  icesus.hud.ep = makeGauge("ep", "EP", "#a855f7")
+  icesus.hud.hp  = makeGauge("hp",  "HP", P.hpGrad)
+  icesus.hud.sp  = makeGauge("sp",  "SP", P.spGrad)
+  icesus.hud.ep  = makeGauge("ep",  "EP", P.epGrad)
+  -- PSP added on demand in refreshGauges() so the layout stays clean
+  -- when the character has no psionics. Left as nil for now.
+  icesus.hud.psp = nil
 
-  -- ----- right column: ONE container, every panel absolute-positioned.
-  -- Nested HBox/VBox inside a Container don't honour x/y in some Mudlet
-  -- versions, so the previous nested layout had the bottom panel
-  -- overlapping the top panel. Flat layout removes that footgun.
+  -- =====================================================================
+  -- RIGHT COLUMN — combat & comms panels.
+  --   Flat absolute layout (Geyser nested HBox/VBox have x/y bugs in
+  --   some Mudlet builds — see v0.2.1 changelog).
+  -- =====================================================================
   icesus.hud.right = Geyser.Container:new({
     name = "icesus.right",
-    x = "-" .. R, y = 0,
+    x = "-" .. R, y = T,
     width = R,
-    height = "100%-" .. B,
+    height = "100%-" .. (T + B),
   })
+  -- Backdrop Label for the right column — see banner note above.
+  icesus.hud.rightBg = Geyser.Label:new({
+    name = "icesus.rightBg",
+    x = 0, y = 0, width = "100%", height = "100%",
+  }, icesus.hud.right)
+  icesus.hud.rightBg:setStyleSheet(string.format([[
+    background: %s;
+    border: none;
+    border-left: 1px solid %s;
+  ]], P.bgMain, P.border))
 
-  -- Geometry constants for the right column.
-  local PAD       = 4
+  local PAD       = 6
   local BTN_H     = 28
-  local CAST_H    = 24
-  local EFFECTS_H = 24
-  local ENEMY_H   = 220
-  local btnY      = PAD                                    -- 4
-  local castY     = btnY + BTN_H + PAD                     -- 36
-  local effectsY  = castY + CAST_H + PAD                   -- 64
-  local enemyY    = effectsY + EFFECTS_H + PAD             -- 92
-  local channelsY = enemyY + ENEMY_H + PAD                 -- 316
+  local CAST_H    = 22
+  local BADGES_H  = 22
+  local ENEMY_H   = 180
+  local btnY       = PAD                                    -- 6
+  local castY      = btnY      + BTN_H    + PAD             -- 40
+  local effectsY   = castY     + CAST_H   + PAD             -- 68
+  local cooldownsY = effectsY  + BADGES_H + 4               -- 94
+  local enemyY     = cooldownsY + BADGES_H + PAD            -- 122
+  local channelsY  = enemyY    + ENEMY_H  + PAD             -- 328
 
-  -- Two side-by-side momentum buttons, absolutely positioned.
-  local btnW = math.floor((R - PAD * 3) / 2)               -- e.g. 156
+  -- Two side-by-side momentum buttons.
+  local btnW = math.floor((R - PAD * 3) / 2)
   local function makeMomentumBtn(key, x)
     local btn = Geyser.Label:new({
       name = "icesus." .. key,
       x = x, y = btnY, width = btnW, height = BTN_H,
     }, icesus.hud.right)
-    btn:setStyleSheet([[
-      background-color: #1a1a1a;
-      color: #555;
-      border: 1px solid #2a2a2a;
+    btn:setStyleSheet(string.format([[
+      background: rgba(255,255,255,0.02);
+      color: %s;
+      border: 1px solid %s;
       border-radius: 4px;
-      font-family: "DejaVu Sans Mono", monospace;
+      font-family: %s;
       font-size: 10pt;
       qproperty-alignment: 'AlignCenter';
-    ]])
-    btn:echo([[<center><span style="color:#555">—</span></center>]])
+    ]], P.textDim, P.border, FS))
+    btn:echo([[<center><span>—</span></center>]])
     return btn
   end
 
   icesus.hud.momentumBtn        = makeMomentumBtn("momentumBtn",        PAD)
   icesus.hud.specialMomentumBtn = makeMomentumBtn("specialMomentumBtn", PAD * 2 + btnW)
-  -- Closures: the icesus.useMomentum etc. functions are defined later
-  -- in this file. Looking them up at click-time (not now) lets the
-  -- order in this script not matter.
   icesus.hud.momentumBtn:setClickCallback(function() icesus.useMomentum() end)
   icesus.hud.specialMomentumBtn:setClickCallback(function() icesus.useSpecialMomentum() end)
 
@@ -175,65 +394,89 @@ function icesus.setupHUD()
     name = "icesus.castGauge",
     x = PAD, y = castY, width = R - PAD * 2, height = CAST_H,
   }, icesus.hud.right)
-  icesus.hud.castGauge.front:setStyleSheet(
-    "background-color: #7c3aed; border: 1px solid #111; border-radius: 2px;")
-  icesus.hud.castGauge.back:setStyleSheet(
-    "background-color: #1a1a1a; border: 1px solid #111; border-radius: 2px;")
-  icesus.hud.castGauge.text:setStyleSheet([[
-    color: #fff;
-    font-family: "DejaVu Sans Mono", monospace;
+  icesus.hud.castGauge.front:setStyleSheet(string.format([[
+    background: %s;
+    border: 1px solid #0a0c18;
+    border-radius: 3px;
+  ]], lg(P.castGrad[1], P.castGrad[2])))
+  icesus.hud.castGauge.back:setStyleSheet(string.format([[
+    background: #0a0c18;
+    border: 1px solid %s;
+    border-radius: 3px;
+  ]], P.border))
+  icesus.hud.castGauge.text:setStyleSheet(string.format([[
+    color: %s;
+    font-family: %s;
     font-size: 9pt;
     qproperty-alignment: 'AlignCenter';
-  ]])
+  ]], P.textBright, FS))
   icesus.hud.castGauge:setValue(0, 1, "—")
 
-  -- Status effects strip.
-  icesus.hud.effectsRow = Geyser.Label:new({
-    name = "icesus.effectsRow",
-    x = PAD, y = effectsY, width = R - PAD * 2, height = EFFECTS_H,
-  }, icesus.hud.right)
-  icesus.hud.effectsRow:setStyleSheet([[
-    background-color: #0d0d0d;
-    color: #888;
-    border: 1px solid #1a1a1a;
-    border-radius: 3px;
-    font-family: "DejaVu Sans Mono", monospace;
-    font-size: 9pt;
-    qproperty-alignment: 'AlignCenter';
-  ]])
+  -- Effects + cooldowns: two stacked full-width rows. Stacking beats
+  -- side-by-side because cooldown pills include "name + Ns" and easily
+  -- overflow a half-row when 2-3 are active.
+  local function makeBadgeRow(key, y)
+    local lbl = Geyser.Label:new({
+      name = "icesus." .. key,
+      x = PAD, y = y, width = R - PAD * 2, height = BADGES_H,
+    }, icesus.hud.right)
+    lbl:setStyleSheet(string.format([[
+      background: %s;
+      color: %s;
+      border: 1px solid %s;
+      border-radius: 3px;
+      font-family: %s;
+      font-size: 9pt;
+      qproperty-alignment: 'AlignCenter';
+    ]], P.bgPanel, P.textDim, P.border, FS))
+    return lbl
+  end
+  icesus.hud.effectsRow   = makeBadgeRow("effectsRow",   effectsY)
+  icesus.hud.cooldownsRow = makeBadgeRow("cooldownsRow", cooldownsY)
   icesus.hud.effectsRow:echo(
-    [[<center><span style="color:#444">no effects</span></center>]])
+    [[<center><span style="color:#555">no effects</span></center>]])
+  icesus.hud.cooldownsRow:echo(
+    [[<center><span style="color:#555">ready</span></center>]])
 
   -- Enemy panel — fixed height block.
   icesus.hud.enemyLabel = Geyser.Label:new({
     name = "icesus.enemyLabel",
-    x = 0, y = enemyY, width = "100%", height = ENEMY_H,
+    x = PAD, y = enemyY, width = R - PAD * 2, height = ENEMY_H,
   }, icesus.hud.right)
-  icesus.hud.enemyLabel:setStyleSheet([[
-    background-color: #1a1a1a;
-    color: #ddd;
-    border: 1px solid #2a2a2a;
-    font-family: "DejaVu Sans Mono", monospace;
+  icesus.hud.enemyLabel:setStyleSheet(string.format([[
+    background: %s;
+    color: %s;
+    border: 1px solid %s;
+    border-radius: 3px;
+    font-family: %s;
     font-size: 10pt;
     qproperty-alignment: 'AlignTop';
-  ]])
+    padding: 4px;
+  ]], P.bgPanel, P.text, P.border, FS))
   icesus.hud.enemyLabel:echo(
-    [[<center><span style="color:#666">no targets</span></center>]])
+    [[<center><span style="color:#555">no targets</span></center>]])
 
   -- Channels — fills the rest of the right column.
   icesus.hud.channels = Geyser.MiniConsole:new({
     name = "icesus.channels",
-    x = 0, y = channelsY, width = "100%",
-    height = "100%-" .. channelsY,
+    x = PAD, y = channelsY,
+    width = R - PAD * 2,
+    height = "100%-" .. (channelsY + PAD),
     autoWrap = true,
     fontSize = 10,
-    color = "#0d0d0d",
+    color = P.bgDeep,
   }, icesus.hud.right)
   icesus.hud.channels:setBufferSize(icesus.config.channelLines, icesus.config.channelLines)
-  icesus.hud.channels:cecho("<grey>--- Icesus channels (Comm.Channel) ---<reset>\n")
+  icesus.hud.channels:cecho("<grey>--- channels ---<reset>\n")
 end
 
 function icesus.teardownHUD()
+  -- Stop any timers (HP critical pulse, etc.) before we drop widget refs.
+  for _, t in pairs(icesus.timers) do
+    if t then pcall(killTimer, t) end
+  end
+  icesus.timers = {}
+
   if not icesus.hud then return end
   for _, w in pairs(icesus.hud) do
     if w and type(w.hide) == "function" then pcall(function() w:hide() end) end
@@ -245,41 +488,186 @@ end
 -- =============================================================
 -- Render.
 -- =============================================================
+local function setGaugeGrad(g, grad)
+  if not g then return end
+  g.front:setStyleSheet(string.format([[
+    background: %s;
+    border: 1px solid #0a0c18;
+    border-radius: 3px;
+  ]], lg(grad[1], grad[2])))
+end
+
 function icesus.refreshGauges()
   if not icesus.hud then return end
+  local P = icesus.palette
   local s = icesus.state.vitals
+
   local function setG(g, cur, max, label)
     if not g then return end
     local m = math.max(max, 1)
     g:setValue(math.min(math.max(cur, 0), m), m,
-      string.format("%s %d/%d", label, cur, max))
+      string.format("%s  %d/%d", label, cur, max))
   end
+
   setG(icesus.hud.hp, s.hp, s.hpmax, "HP")
   setG(icesus.hud.sp, s.sp, s.spmax, "SP")
   setG(icesus.hud.ep, s.ep, s.epmax, "EP")
+
+  -- HP critical: drive a pulse timer that flips between two gradients.
+  local critical = (s.hpmax > 0) and (s.hp / s.hpmax < 0.25)
+  if critical and not icesus.state.hpCritical then
+    icesus.state.hpCritical = true
+    icesus.startHpPulse()
+  elseif (not critical) and icesus.state.hpCritical then
+    icesus.state.hpCritical = false
+    icesus.stopHpPulse()
+    setGaugeGrad(icesus.hud.hp, P.hpGrad)
+  end
+
+  -- PSP: lazy-create when max becomes positive; tear down when it drops.
+  if s.pspmax > 0 then
+    if not icesus.hud.psp then
+      icesus.hud.psp = Geyser.Gauge:new({ name = "icesus.psp" }, icesus.hud.bottom)
+      icesus.hud.psp.front:setStyleSheet(string.format([[
+        background: %s; border: 1px solid #0a0c18; border-radius: 3px;
+      ]], lg(P.pspGrad[1], P.pspGrad[2])))
+      icesus.hud.psp.back:setStyleSheet(string.format([[
+        background: #0a0c18; border: 1px solid %s; border-radius: 3px;
+      ]], P.border))
+      icesus.hud.psp.text:setStyleSheet(string.format([[
+        color: %s;
+        font-family: %s;
+        font-size: 10pt;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        qproperty-alignment: 'AlignCenter';
+      ]], P.textBright, icesus.fontStack))
+    end
+    setG(icesus.hud.psp, s.psp, s.pspmax, "PSP")
+  end
+end
+
+function icesus.startHpPulse()
+  if icesus.timers.hpPulse then return end
+  -- Toggle between two HP-critical gradients every 0.6s. Subtle pulse.
+  icesus.timers.hpPulse = tempTimer(0.6, function()
+    if not icesus.hud or not icesus.hud.hp then return end
+    icesus.state.pulseOn = not icesus.state.pulseOn
+    local P = icesus.palette
+    if icesus.state.pulseOn then
+      setGaugeGrad(icesus.hud.hp, P.hpGradC)
+    else
+      setGaugeGrad(icesus.hud.hp, P.hpGrad)
+    end
+  end, true)
+end
+
+function icesus.stopHpPulse()
+  if icesus.timers.hpPulse then
+    pcall(killTimer, icesus.timers.hpPulse)
+    icesus.timers.hpPulse = nil
+  end
+  icesus.state.pulseOn = false
+end
+
+function icesus.refreshIdentity()
+  if not icesus.hud or not icesus.hud.identityLabel then return end
+  local P  = icesus.palette
+  local id = icesus.state.identity
+  local name = id.name ~= "" and id.name or "—"
+  local meta = {}
+  if id.level and id.level > 0 then table.insert(meta, "Lvl " .. id.level) end
+  if id.race  and id.race  ~= "" then table.insert(meta, htmlEscape(id.race))  end
+  if id.guild and id.guild ~= "" then table.insert(meta, htmlEscape(id.guild)) end
+  local sep = string.format(
+    [[<span style="color:%s">&nbsp;&middot;&nbsp;</span>]], P.borderBright)
+  icesus.hud.identityLabel:echo(string.format(
+    [[<span style="color:%s;font-weight:700;letter-spacing:0.5px">%s</span>]]
+    .. [[<span style="color:%s">&nbsp;&nbsp;</span>]]
+    .. [[<span style="color:%s;font-size:9pt">%s</span>]],
+    P.iceBright, htmlEscape(name),
+    P.borderBright,
+    P.textDim, table.concat(meta, sep)))
+end
+
+function icesus.refreshExp()
+  if not icesus.hud or not icesus.hud.expGauge then return end
+  local e = icesus.state.exp
+  local total = math.max(e.tnl or 0, 1)
+  local cur   = math.max(e.exp or 0, 0)
+  if cur > total then cur = total end
+  local pct   = (e.tnl and e.tnl > 0) and string.format("%.1f%%", cur * 100 / total) or "—"
+  if e.tnl and e.tnl > 0 then
+    icesus.hud.expGauge:setValue(cur, total, string.format(
+      "EXP  %s / %s   %s to next", shortAmount(cur), shortAmount(total), pct))
+  else
+    icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
+  end
+end
+
+function icesus.refreshCarry()
+  if not icesus.hud or not icesus.hud.carryLabel then return end
+  local P = icesus.palette
+  local c = icesus.state.carry
+  local parts = {}
+  if c.money and c.money > 0 then
+    table.insert(parts, string.format(
+      [[<span style="color:#fbbf24;font-weight:600">%s sp</span>]],
+      shortAmount(c.money)))
+  end
+  if c.dfavor and c.dfavor > 0 then
+    table.insert(parts, string.format(
+      [[<span style="color:#c084fc;font-weight:600">%d DF</span>]],
+      c.dfavor))
+  end
+  if c.wtmax and c.wtmax > 0 then
+    local pct = math.floor(c.wt * 100 / c.wtmax)
+    local col = pct >= 90 and "#ef4444" or (pct >= 70 and "#fbbf24" or "#5eead4")
+    table.insert(parts, string.format(
+      [[<span style="color:%s;font-weight:600">wt %d%%</span>]], col, pct))
+  end
+  if #parts == 0 then
+    icesus.hud.carryLabel:echo([[<span style="color:#555">—</span>]])
+  else
+    local sep = string.format(
+      [[<span style="color:%s">&nbsp;&middot;&nbsp;</span>]], P.borderBright)
+    icesus.hud.carryLabel:echo(table.concat(parts, sep))
+  end
 end
 
 function icesus.refreshEnemies()
   if not icesus.hud or not icesus.hud.enemyLabel then return end
+  local P = icesus.palette
   local enemies = icesus.state.enemies
   if #enemies == 0 then
     icesus.hud.enemyLabel:echo(
-      [[<center><span style="color:#666">no targets</span></center>]])
+      [[<center><span style="color:#555">no targets</span></center>]])
     return
   end
+  -- Compose a stack of {name | bar | %} rows. The bar is rendered with
+  -- HTML block characters tinted by the enemy gradient — Qt's <table>
+  -- inside a Label keeps clean alignment.
   local rows = { [[<table width="100%" cellspacing="0" cellpadding="2" ]]
-    .. [[style="font-family:monospace;font-size:10pt">]] }
+    .. [[style="font-family:monospace">]] }
   for _, e in ipairs(enemies) do
     local pct  = tonumber(e.hp) or 0
     local col  = shapeColor(pct)
     local name = htmlEscape(e.name)
-    local bar = string.rep("&#9608;", math.floor(pct / 10)) -- █ blocks
+    local fill = math.floor(pct / 5)               -- out of 20
+    local bar  = string.rep("&#9608;", fill)        -- █ blocks
+    local rest = string.rep("&#9617;", 20 - fill)   -- ░ blocks
     table.insert(rows, string.format(
-      [[<tr><td style="color:#ddd;padding-right:6px">%s</td>]]
-      .. [[<td style="color:%s;font-weight:bold">%s</td>]]
-      .. [[<td style="color:#888;text-align:right">%d%%</td></tr>]]
-      .. [[<tr><td colspan="3" style="color:#888;font-size:9pt;padding-bottom:4px">%s</td></tr>]],
-      name, col, bar, pct, htmlEscape(e.shape)))
+      [[<tr><td style="color:%s;font-weight:600;padding-right:6px">%s</td>]]
+      .. [[<td style="color:%s;text-align:right;font-size:9pt">%d%%</td></tr>]]
+      .. [[<tr><td colspan="2" style="font-size:11pt;line-height:1.0">]]
+      .. [[<span style="color:%s">%s</span>]]
+      .. [[<span style="color:#1a1e35">%s</span></td></tr>]]
+      .. [[<tr><td colspan="2" style="color:%s;font-size:9pt;font-style:italic;]]
+      .. [[padding-bottom:4px">%s</td></tr>]],
+      P.textBright, name,
+      P.textDim,    pct,
+      col, bar, rest,
+      P.textDim, htmlEscape(e.shape)))
   end
   table.insert(rows, "</table>")
   icesus.hud.enemyLabel:echo(table.concat(rows))
@@ -287,35 +675,44 @@ end
 
 function icesus.refreshMomentum()
   if not icesus.hud then return end
-  local function paint(btn, val, label, color)
+  local P  = icesus.palette
+  local FS = icesus.fontStack
+  local function paint(btn, val, fg, bgRGBA, bdRGBA)
     if not btn then return end
     if val and val ~= "" then
       btn:setStyleSheet(string.format([[
-        background-color: %s;
-        color: #fff;
+        background: %s;
+        color: %s;
         border: 1px solid %s;
         border-radius: 4px;
-        font-family: "DejaVu Sans Mono", monospace;
+        font-family: %s;
         font-size: 10pt;
+        font-weight: 700;
+        letter-spacing: 1px;
         qproperty-alignment: 'AlignCenter';
-      ]], color, color))
+      ]], bgRGBA, fg, bdRGBA, FS))
       btn:echo(string.format(
-        [[<center>%s <b>%s</b></center>]], label, htmlEscape(val)))
+        [[<center>%s</center>]], htmlEscape(val):upper()))
     else
-      btn:setStyleSheet([[
-        background-color: #1a1a1a;
-        color: #555;
-        border: 1px solid #2a2a2a;
+      btn:setStyleSheet(string.format([[
+        background: rgba(255,255,255,0.02);
+        color: %s;
+        border: 1px solid %s;
         border-radius: 4px;
-        font-family: "DejaVu Sans Mono", monospace;
+        font-family: %s;
         font-size: 10pt;
         qproperty-alignment: 'AlignCenter';
-      ]])
-      btn:echo([[<center><span style="color:#555">—</span></center>]])
+      ]], P.textDim, P.border, FS))
+      btn:echo([[<center><span>—</span></center>]])
     end
   end
-  paint(icesus.hud.momentumBtn,        icesus.state.momentum,        "use", "#0891b2")
-  paint(icesus.hud.specialMomentumBtn, icesus.state.specialMomentum, "use", "#c026d3")
+  -- Cold-pass: blood-on-snow (deep crimson) for primary momentum,
+  -- frosted ice-violet for special. Webclient ships orange/purple but
+  -- saturated orange feels off-theme on a frozen-planet HUD.
+  paint(icesus.hud.momentumBtn,        icesus.state.momentum,
+        "#fca5a5", "rgba(153,27,27,0.20)",  "rgba(220,38,38,0.55)")
+  paint(icesus.hud.specialMomentumBtn, icesus.state.specialMomentum,
+        "#d8b4fe", "rgba(91,33,182,0.22)",  "rgba(126,34,206,0.55)")
 end
 
 function icesus.refreshCasting()
@@ -327,7 +724,8 @@ function icesus.refreshCasting()
   end
   local total = math.max(tonumber(c.cps) or 1, 1)
   local prog  = math.min(math.max(tonumber(c.progress) or 0, 0), total)
-  icesus.hud.castGauge:setValue(prog, total, "casting " .. (c.spell or ""))
+  icesus.hud.castGauge:setValue(prog, total,
+    "casting " .. (c.spell or ""))
 end
 
 function icesus.refreshEffects()
@@ -335,18 +733,67 @@ function icesus.refreshEffects()
   local fx = icesus.state.effects
   if not fx or #fx == 0 then
     icesus.hud.effectsRow:echo(
-      [[<center><span style="color:#444">no effects</span></center>]])
+      [[<center><span style="color:#555">no effects</span></center>]])
     return
   end
   local parts = { [[<center>]] }
-  for _, e in ipairs(fx) do
+  for i, e in ipairs(fx) do
+    local style = effectStyle(e)
     table.insert(parts, string.format(
-      [[<span style="background:#7c2d12;color:#fff;padding:1px 5px;]]
-      .. [[margin-right:3px;border-radius:3px;font-size:9pt">%s</span>]],
-      htmlEscape(e):upper()))
+      [[<span style="background:%s;color:%s;border:1px solid %s;]]
+      .. [[padding:0px 6px;border-radius:3px;font-size:8pt;font-weight:700;]]
+      .. [[letter-spacing:0.5px">%s</span>]],
+      style.bg, style.fg, style.bd, htmlEscape(e):upper()))
+    if i < #fx then table.insert(parts, [[<span>&nbsp;</span>]]) end
   end
   table.insert(parts, [[</center>]])
   icesus.hud.effectsRow:echo(table.concat(parts))
+end
+
+local function cooldownColor(ratio)
+  -- ratio = remaining/total: 1.0 = just fired, 0.0 = ready. Webclient
+  -- uses cyan as default and shifts to green when expiring.
+  if ratio >= 0.75 then
+    return { fg = "#fca5a5",
+             bg = "rgba(248,113,113,0.18)",
+             bd = "rgba(248,113,113,0.40)" }
+  elseif ratio >= 0.20 then
+    return { fg = "#38bdf8",
+             bg = "rgba(56,189,248,0.15)",
+             bd = "rgba(56,189,248,0.30)" }
+  else
+    return { fg = "#4ade80",
+             bg = "rgba(74,222,128,0.20)",
+             bd = "rgba(74,222,128,0.40)" }
+  end
+end
+
+function icesus.refreshCooldowns()
+  if not icesus.hud or not icesus.hud.cooldownsRow then return end
+  local cds = icesus.state.cooldowns
+  if not cds or #cds == 0 then
+    icesus.hud.cooldownsRow:echo(
+      [[<center><span style="color:#555">ready</span></center>]])
+    return
+  end
+  -- Compact "name Ns" pills; no trailing spacer to keep the row dense.
+  -- Multi-word names (e.g. "breath weapon") use a non-break space so
+  -- the pill stays one unit when the renderer wraps.
+  local parts = { [[<center>]] }
+  for i, c in ipairs(cds) do
+    local rem   = math.max(tonumber(c.remaining) or 0, 0)
+    local tot   = math.max(tonumber(c.total)     or 1, 1)
+    local style = cooldownColor(rem / tot)
+    local name  = htmlEscape(c.name):gsub(" ", "&nbsp;")
+    table.insert(parts, string.format(
+      [[<span style="background:%s;color:%s;border:1px solid %s;]]
+      .. [[padding:0px 5px;border-radius:3px;font-size:8pt;font-weight:700;]]
+      .. [[letter-spacing:0.3px">%s <span style="opacity:0.65">%ds</span></span>]],
+      style.bg, style.fg, style.bd, name, rem))
+    if i < #cds then table.insert(parts, [[<span>&nbsp;</span>]]) end
+  end
+  table.insert(parts, [[</center>]])
+  icesus.hud.cooldownsRow:echo(table.concat(parts))
 end
 
 -- =============================================================
@@ -362,9 +809,11 @@ function icesus.onVitals()
   s.hp     = tonumber(v.hp)       or s.hp
   s.sp     = tonumber(v.mana)     or s.sp
   s.ep     = tonumber(v.moves)    or s.ep
+  s.psp    = tonumber(v.psp)      or s.psp
   s.hpmax  = tonumber(v.maxhp)    or s.hpmax
   s.spmax  = tonumber(v.maxmana)  or s.spmax
   s.epmax  = tonumber(v.maxmoves) or s.epmax
+  s.pspmax = tonumber(v.maxpsp)   or s.pspmax
   icesus.refreshGauges()
 end
 
@@ -372,15 +821,57 @@ function icesus.onMaxstats()
   local v = gmcp.Char and gmcp.Char.Maxstats
   if not v then return end
   local s = icesus.state.vitals
-  s.hpmax = tonumber(v.maxhp)    or s.hpmax
-  s.spmax = tonumber(v.maxmana)  or s.spmax
-  s.epmax = tonumber(v.maxmoves) or s.epmax
+  s.hpmax  = tonumber(v.maxhp)    or s.hpmax
+  s.spmax  = tonumber(v.maxmana)  or s.spmax
+  s.epmax  = tonumber(v.maxmoves) or s.epmax
+  s.pspmax = tonumber(v.maxpsp)   or s.pspmax
   icesus.refreshGauges()
+end
+
+function icesus.onBase()
+  local b = gmcp.Char and gmcp.Char.Base
+  if not b then return end
+  local id = icesus.state.identity
+  if b.name  ~= nil then id.name  = tostring(b.name)  end
+  if b.title ~= nil then id.title = tostring(b.title) end
+  if b.race  ~= nil then id.race  = tostring(b.race)  end
+  if b.guild ~= nil then id.guild = tostring(b.guild) end
+  if b.class ~= nil and (id.guild == nil or id.guild == "") then
+    id.guild = tostring(b.class)  -- some servers send 'class'
+  end
+  icesus.refreshIdentity()
 end
 
 function icesus.onStatus()
   local s = gmcp.Char and gmcp.Char.Status
   if not s then return end
+
+  -- identity (level can ride on Status)
+  if s.level ~= nil then
+    icesus.state.identity.level = tonumber(s.level) or 0
+    icesus.refreshIdentity()
+  end
+
+  -- exp / tnl
+  if s.exp ~= nil or s.tnl ~= nil then
+    icesus.state.exp.exp = tonumber(s.exp) or icesus.state.exp.exp
+    icesus.state.exp.tnl = tonumber(s.tnl) or icesus.state.exp.tnl
+    icesus.refreshExp()
+  end
+
+  -- carry
+  local c = icesus.state.carry
+  if s.money     ~= nil then c.money  = tonumber(s.money)     or 0 end
+  if s.bank      ~= nil then c.bank   = tonumber(s.bank)      or 0 end
+  if s.dfavor    ~= nil then c.dfavor = tonumber(s.dfavor)    or 0 end
+  if s.carry_wt  ~= nil then c.wt     = tonumber(s.carry_wt)  or 0 end
+  if s.max_wt    ~= nil then c.wtmax  = tonumber(s.max_wt)    or 0 end
+  if s.carry_vol ~= nil then c.vol    = tonumber(s.carry_vol) or 0 end
+  if s.max_vol   ~= nil then c.volmax = tonumber(s.max_vol)   or 0 end
+  if s.money ~= nil or s.dfavor ~= nil or s.carry_wt ~= nil
+     or s.max_wt ~= nil then
+    icesus.refreshCarry()
+  end
 
   -- enemies
   icesus.state.enemies = {}
@@ -403,7 +894,7 @@ function icesus.onStatus()
   icesus.refreshEnemies()
 
   -- momentum
-  icesus.state.momentum        = s.momentum        or ""
+  icesus.state.momentum        = s.momentum         or ""
   icesus.state.specialMomentum = s.special_momentum or ""
   icesus.refreshMomentum()
 
@@ -427,6 +918,23 @@ function icesus.onCasting()
   icesus.refreshCasting()
 end
 
+function icesus.onCooldowns()
+  local d = gmcp.Char and gmcp.Char.Cooldowns
+  if not d then return end
+  local list = {}
+  if type(d.cooldowns) == "table" then
+    for _, c in ipairs(d.cooldowns) do
+      table.insert(list, {
+        name      = c.name or "?",
+        remaining = tonumber(c.remaining) or 0,
+        total     = tonumber(c.total)     or 0,
+      })
+    end
+  end
+  icesus.state.cooldowns = list
+  icesus.refreshCooldowns()
+end
+
 function icesus.onEnemyDeath()
   local d = gmcp.Char and gmcp.Char.EnemyDeath
   if not d or not d.name then return end
@@ -447,10 +955,11 @@ function icesus.onChannel()
   local who  = c.player or ""
   local msg  = c.msg or ""
   if who ~= "" then
-    mc:cecho(string.format("<grey>%s<reset><cyan>[%s]<reset> <yellow>%s<reset>: %s\n",
+    mc:cecho(string.format(
+      "<grey>%s<reset><DodgerBlue>[%s]<reset> <gold>%s<reset>: %s\n",
       time, chan, who, msg))
   else
-    mc:cecho(string.format("<grey>%s<reset><cyan>[%s]<reset> %s\n",
+    mc:cecho(string.format("<grey>%s<reset><DodgerBlue>[%s]<reset> %s\n",
       time, chan, msg))
   end
 end
@@ -491,10 +1000,12 @@ end
 function icesus.install()
   icesus.uninstall()                            -- idempotent
   icesus.setupHUD()
+  reg("gmcp.Char.Base",       icesus.onBase)
   reg("gmcp.Char.Vitals",     icesus.onVitals)
   reg("gmcp.Char.Maxstats",   icesus.onMaxstats)
   reg("gmcp.Char.Status",     icesus.onStatus)
   reg("gmcp.Char.Casting",    icesus.onCasting)
+  reg("gmcp.Char.Cooldowns",  icesus.onCooldowns)
   reg("gmcp.Char.EnemyDeath", icesus.onEnemyDeath)
   reg("gmcp.Comm.Channel",    icesus.onChannel)
   reg("sysConnectionEvent",   icesus.subscribeGMCP)
@@ -502,7 +1013,8 @@ function icesus.install()
   if isConnected and isConnected() then icesus.subscribeGMCP() end
   cecho("\n<lime_green>Icesus<reset> package <yellow>v"
     .. icesus.version .. "<reset> ready. "
-    .. "<grey>(vitals, momentum, casting, effects, enemies, channels)<reset>\n")
+    .. "<grey>(identity, exp, vitals, momentum, casting, effects, "
+    .. "cooldowns, enemies, channels)<reset>\n")
 end
 
 function icesus.uninstall()
