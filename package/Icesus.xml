@@ -273,7 +273,7 @@ function icesus.refreshEnemies()
     local pct  = tonumber(e.hp) or 0
     local col  = shapeColor(pct)
     local name = htmlEscape(e.name)
-    local bar  = string.rep("\xe2\x96\x88", math.floor(pct / 10))   -- █ blocks
+    local bar = string.rep("&#9608;", math.floor(pct / 10)) -- █ blocks
     table.insert(rows, string.format(
       [[<tr><td style="color:#ddd;padding-right:6px">%s</td>]]
       .. [[<td style="color:%s;font-weight:bold">%s</td>]]
