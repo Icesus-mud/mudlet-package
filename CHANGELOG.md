@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.3.3 — 2026-05-10
+
+Real fix for the "fonts still tiny" problem from v0.3.2 — and the
+cooldown clip while we're here.
+
+- **Fonts now actually grow.** v0.3.2's pt-size bumps were CSS
+  `font-size` declarations in `setStyleSheet`, which Qt silently
+  ignores on this Mudlet build (it honours colour and background
+  but not font sizing inside QLabel stylesheets). Each widget now
+  also calls Geyser's `setFontSize()` after construction, which
+  routes through QFont and actually takes. Channels MiniConsole
+  was unaffected because it was already using the native fontSize
+  constructor param.
+- **Vitals labels stop clipping.** Bumped to `setFontSize(12)` on
+  the gauge text instead of 14 — "HP 142/200" now fits inside a
+  ~95 px gauge slot.
+- **Cooldown / effect pills built from whitespace, not CSS.** Qt's
+  HTML-in-QLabel renderer ignores inline `padding` and `border`
+  too, so v0.3.2 cooldowns rendered as run-together text without
+  the pill chrome. Replaced with literal `&nbsp;` spacing inside
+  coloured `background` spans — always works, looks like pills,
+  and sidesteps the CSS dead end.
+- **Adaptive cooldown density.** When 3+ cooldowns are active,
+  long names truncate to 8 chars + ellipsis; at 4+ the seconds
+  suffix is dropped too. Keeps 3 pills on screen even with
+  "breath weapon 90s" running.
+- **Location bar cellpadding** so "Vaerlon exits:" stops running
+  together when the bigger font crowds the columns.
+
 ## v0.3.2 — 2026-05-10
 
 Second pass on font sizes after a real-monitor screenshot. v0.3.1's

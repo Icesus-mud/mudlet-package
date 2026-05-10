@@ -17,7 +17,7 @@
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v0.3.2  •  https://github.com/Icesus-mud/mudlet-package
+-- v0.3.3  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "0.3.2"
+icesus.version = "0.3.3"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -254,6 +254,9 @@ function icesus.setupHUD()
     qproperty-alignment: 'AlignLeft | AlignVCenter';
     padding: 0;
   ]], P.text, FS))
+  -- CSS font-size is silently ignored by Qt on some Mudlet builds.
+  -- Geyser's setFontSize goes through QFont and always takes.
+  pcall(function() icesus.hud.identityLabel:setFontSize(15) end)
 
   -- Carry summary (right half of banner row 1).
   icesus.hud.carryLabel = Geyser.Label:new({
@@ -268,6 +271,7 @@ function icesus.setupHUD()
     qproperty-alignment: 'AlignRight | AlignVCenter';
     padding: 0;
   ]], P.textDim, FS))
+  pcall(function() icesus.hud.carryLabel:setFontSize(12) end)
 
   -- EXP gauge (banner row 2). Geyser.Gauge with forest gradient.
   -- Cap width on widescreens so the centred label stays near the eye.
@@ -300,6 +304,7 @@ function icesus.setupHUD()
     font-weight: 700;
     qproperty-alignment: 'AlignCenter';
   ]], P.textBright, FS))
+  pcall(function() icesus.hud.expGauge.text:setFontSize(12) end)
   icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
 
   -- =====================================================================
@@ -326,6 +331,7 @@ function icesus.setupHUD()
     qproperty-alignment: 'AlignVCenter';
     padding: 0 14px;
   ]], P.bgPanel, P.text, P.border, FS))
+  pcall(function() icesus.hud.locationLabel:setFontSize(11) end)
   icesus.hud.locationLabel:echo([[<span style="color:#555">—</span>]])
 
   icesus.hud.bottom = Geyser.HBox:new({
@@ -355,6 +361,9 @@ function icesus.setupHUD()
       letter-spacing: 0.5px;
       qproperty-alignment: 'AlignCenter';
     ]], P.textBright, FS))
+    -- 12pt fits "HP 142/200" inside a ~95 px gauge slot at this build's
+    -- effective DPI; 14 clipped the trailing digits.
+    pcall(function() g.text:setFontSize(12) end)
     g:setValue(0, 1, label)
     return g
   end
@@ -416,6 +425,7 @@ function icesus.setupHUD()
       font-size: 14pt;
       qproperty-alignment: 'AlignCenter';
     ]], P.textDim, P.border, FS))
+    pcall(function() btn:setFontSize(12) end)
     btn:echo([[<center><span>—</span></center>]])
     return btn
   end
@@ -447,6 +457,7 @@ function icesus.setupHUD()
     font-weight: 600;
     qproperty-alignment: 'AlignCenter';
   ]], P.textBright, FS))
+  pcall(function() icesus.hud.castGauge.text:setFontSize(12) end)
   icesus.hud.castGauge:setValue(0, 1, "—")
 
   -- Effects + cooldowns: two stacked full-width rows. Stacking beats
@@ -466,6 +477,7 @@ function icesus.setupHUD()
       font-size: 13pt;
       qproperty-alignment: 'AlignCenter';
     ]], P.bgPanel, P.textDim, P.border, FS))
+    pcall(function() lbl:setFontSize(11) end)
     return lbl
   end
   icesus.hud.effectsRow   = makeBadgeRow("effectsRow",   effectsY)
@@ -490,6 +502,7 @@ function icesus.setupHUD()
     qproperty-alignment: 'AlignTop';
     padding: 4px;
   ]], P.bgPanel, P.text, P.border, FS))
+  pcall(function() icesus.hud.enemyLabel:setFontSize(12) end)
   icesus.hud.enemyLabel:echo(
     [[<center><span style="color:#555">no targets</span></center>]])
 
@@ -574,11 +587,12 @@ function icesus.refreshGauges()
       icesus.hud.psp.text:setStyleSheet(string.format([[
         color: %s;
         font-family: %s;
-        font-size: 10pt;
-        font-weight: 600;
+        font-size: 17pt;
+        font-weight: 700;
         letter-spacing: 0.5px;
         qproperty-alignment: 'AlignCenter';
       ]], P.textBright, icesus.fontStack))
+      pcall(function() icesus.hud.psp.text:setFontSize(12) end)
     end
     setG(icesus.hud.psp, s.psp, s.pspmax, "PSP")
   end
@@ -800,15 +814,17 @@ function icesus.refreshEffects()
       [[<center><span style="color:#555">no effects</span></center>]])
     return
   end
+  -- Qt's HTML-in-QLabel renderer ignores CSS padding/border on inline
+  -- spans on this build, so pills are built from literal &nbsp;
+  -- whitespace inside a coloured background span. Always works.
   local parts = { [[<center>]] }
   for i, e in ipairs(fx) do
     local style = effectStyle(e)
     table.insert(parts, string.format(
-      [[<span style="background:%s;color:%s;border:1px solid %s;]]
-      .. [[padding:2px 9px;border-radius:3px;font-size:13pt;font-weight:700;]]
-      .. [[letter-spacing:0.5px">%s</span>]],
-      style.bg, style.fg, style.bd, htmlEscape(e):upper()))
-    if i < #fx then table.insert(parts, [[<span>&nbsp;&nbsp;</span>]]) end
+      [[<span style="background:%s;color:%s;font-weight:700">]]
+      .. [[&nbsp;&nbsp;%s&nbsp;&nbsp;</span>]],
+      style.bg, style.fg, htmlEscape(e):upper()))
+    if i < #fx then table.insert(parts, "&nbsp;&nbsp;&nbsp;") end
   end
   table.insert(parts, [[</center>]])
   icesus.hud.effectsRow:echo(table.concat(parts))
@@ -840,21 +856,32 @@ function icesus.refreshCooldowns()
       [[<center><span style="color:#555">ready</span></center>]])
     return
   end
-  -- Compact "name Ns" pills; no trailing spacer to keep the row dense.
-  -- Multi-word names (e.g. "breath weapon") use a non-break space so
-  -- the pill stays one unit when the renderer wraps.
+
+  -- Adaptive density: with 3+ cooldowns we truncate long names so
+  -- "breath weapon 90s" doesn't shove the third pill off the right
+  -- edge of the column; with 4+ we also drop the seconds suffix.
+  -- (CSS padding/font-size on inline spans is ignored by Qt's
+  -- HTML-in-QLabel renderer on this build, so density is the only
+  -- knob we have.)
+  local n        = #cds
+  local nameMax  = (n >= 3) and 8 or 64
+  local showSecs = (n < 4)
+
+  -- Same whitespace-pill trick as effects (CSS padding ignored by Qt).
   local parts = { [[<center>]] }
   for i, c in ipairs(cds) do
     local rem   = math.max(tonumber(c.remaining) or 0, 0)
     local tot   = math.max(tonumber(c.total)     or 1, 1)
     local style = cooldownColor(rem / tot)
-    local name  = htmlEscape(c.name):gsub(" ", "&nbsp;")
+    local raw   = tostring(c.name or "?")
+    if #raw > nameMax then raw = raw:sub(1, nameMax - 1) .. "…" end
+    local name  = htmlEscape(raw):gsub(" ", "&nbsp;")
+    local secs  = showSecs and string.format("&nbsp;%ds", rem) or ""
     table.insert(parts, string.format(
-      [[<span style="background:%s;color:%s;border:1px solid %s;]]
-      .. [[padding:2px 7px;border-radius:3px;font-size:13pt;font-weight:700;]]
-      .. [[letter-spacing:0.3px">%s <span style="opacity:0.65">%ds</span></span>]],
-      style.bg, style.fg, style.bd, name, rem))
-    if i < #cds then table.insert(parts, [[<span>&nbsp;</span>]]) end
+      [[<span style="background:%s;color:%s;font-weight:700">]]
+      .. [[&nbsp;%s%s&nbsp;</span>]],
+      style.bg, style.fg, name, secs))
+    if i < n then table.insert(parts, "&nbsp;&nbsp;") end
   end
   table.insert(parts, [[</center>]])
   icesus.hud.cooldownsRow:echo(table.concat(parts))
@@ -1068,9 +1095,11 @@ function icesus.refreshRoom()
   end
 
   -- HTML table keeps the location flush left and the exits flush right
-  -- in the same row even though Geyser.Label has no flex layout.
+  -- in the same row even though Geyser.Label has no flex layout. The
+  -- explicit cellpadding stops "Vaerlonexits:" running together when
+  -- the bigger font shoves the columns up against each other.
   icesus.hud.locationLabel:echo(string.format(
-    [[<table width="100%%" cellspacing="0" cellpadding="0">]]
+    [[<table width="100%%" cellspacing="0" cellpadding="6">]]
     .. [[<tr><td align="left">%s</td>]]
     .. [[<td align="right">%s</td></tr></table>]],
     table.concat(left, sep), exitText))
