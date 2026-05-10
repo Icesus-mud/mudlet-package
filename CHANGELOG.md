@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.0.0 — 2026-05-10
+
+First stable release. The HUD is feature-complete enough to recommend
+to every Icesus player: banner, vitals, location, momentum, casting,
+effects, cooldowns, enemy panel, and channel feed all read from
+GMCP and stay in sync without a single hand-written trigger. Visual
+language is ported from the play.icesus.org web client so the two
+clients feel like siblings.
+
+What's in the box:
+
+- **Top banner** — identity (name / level / race / guild) and carry
+  summary (money / divine favor / weight %), with a full-width forest
+  EXP gauge below.
+- **Bottom strip** — slim glass HP / SP / EP gauges (PSP if applicable)
+  with a vertical-gradient fill, plus a location/exits row showing room,
+  area, `SAFE` chip, and open exits as short cyan letters.
+- **Right column** — momentum and special-momentum click buttons,
+  glacier-cyan casting bar that turns amber for non-spell `busy`
+  activities (camping, smelting, fishing), per-effect colour-coded
+  status badges, cooldown pills with adaptive density, enemy bars
+  using the server's 12-tier shape buckets, and a channel feed
+  miniconsole with timestamps.
+- **HP critical pulse** — gauge alternates between two red shades when
+  HP drops below 25 %.
+- **Hot-reload safe** — editing in Mudlet's IDE replaces the running
+  HUD cleanly; no leftover gauges, no error spam.
+
+GMCP packages consumed: `Char.Base`, `Char.Vitals`, `Char.Maxstats`,
+`Char.Status`, `Char.Casting`, `Char.Cooldowns`, `Char.EnemyDeath`,
+`Comm.Channel`, `Room.Info`.
+
+The 0.x line (v0.1 → v0.3.5) was the feedback build. Entries below
+are kept as historical record.
+
 ## v0.3.5 — 2026-05-10
 
 Visual consistency pass: the EXP bar still wore v0.3.3's flat-block

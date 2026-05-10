@@ -26,10 +26,10 @@ issue first — happy to expand scope, but small package > big package.
 └── README.md
 ```
 
-For v0.1 the entire package is one Lua script. As modules land, we'll
-likely split each major panel (cooldowns, casting, minimap, …) into its
-own `<Script>` block under the `Icesus` group, all sharing the `icesus.*`
-global namespace.
+For v1.0 the entire package is one Lua script. As more panels land
+(minimap, party, sound), we'll likely split each major one into its
+own `<Script>` block under the `Icesus` group, all sharing the
+`icesus.*` global namespace.
 
 ## Editing the package
 
@@ -82,8 +82,9 @@ the style in `git log`.
 
 ## Testing
 
-There's no automated test suite for v0.1 — Mudlet packages live or die
-by how they feel in-game. Before you submit a PR:
+There's no automated test suite — Mudlet packages live or die by how
+they feel in-game. The headless harness in `tools/mudlet-dev/` is for
+layout iteration, not regression testing. Before you submit a PR:
 
 1. Build it (`./build/build.sh`).
 2. Install the built `.mpackage` into a clean Mudlet profile.

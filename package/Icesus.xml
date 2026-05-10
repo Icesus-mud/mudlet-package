@@ -17,7 +17,7 @@
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v0.3.3  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.0  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "0.3.5"
+icesus.version = "1.0.0"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end

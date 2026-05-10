@@ -1,6 +1,10 @@
 # Icesus Mudlet Package — Design
 
-**Status:** scope draft, gathering player feedback. No code yet.
+**Status:** v1.0 shipped — banner, vitals, location, momentum, casting,
+effects, cooldowns, enemies, channels all live. This document keeps the
+longer-term plan (minimap, party, sound, themes, GMCP sync). See
+`CHANGELOG.md` for what's actually in the package and `README.md` for
+the user-facing tour.
 **Repo placement:** `Icesus-mud/mudlet-package` (public). Contributor-led
 maintenance, with `Icesus-mud` org as owner so spec coordination with the
 mudlib is institutional rather than personal. Contributors get push access
