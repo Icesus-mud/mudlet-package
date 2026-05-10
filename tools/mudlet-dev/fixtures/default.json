@@ -1,0 +1,89 @@
+[
+  {
+    "delay_ms": 200,
+    "package": "Char.Maxstats",
+    "payload": {
+      "maxhp":    200,
+      "maxmana":  120,
+      "maxmoves": 80,
+      "maxpsp":   50
+    }
+  },
+  {
+    "delay_ms": 50,
+    "package": "Char.Vitals",
+    "payload": {
+      "hp":       142,
+      "mana":      88,
+      "moves":     60,
+      "psp":       30,
+      "maxhp":    200,
+      "maxmana":  120,
+      "maxmoves": 80,
+      "maxpsp":   50
+    }
+  },
+  {
+    "delay_ms": 100,
+    "package": "Char.Status",
+    "payload": {
+      "level":      42,
+      "exp":        153400,
+      "tnl":        200000,
+      "pos":        "standing",
+      "state":      "combat",
+      "money":      1234,
+      "bank":       9999,
+      "dfavor":     3,
+      "carry_wt":   8500,
+      "max_wt":     20000,
+      "carry_vol":  3200,
+      "max_vol":    12000,
+      "effects":    ["bleeding", "stunned"],
+      "enemies": [
+        { "name": "an orc warrior",  "hp": 60, "shape": "severely hurt"  },
+        { "name": "an orc shaman",   "hp": 90, "shape": "slightly hurt"  },
+        { "name": "a dire wolf",     "hp": 40, "shape": "badly wounded"  }
+      ],
+      "momentum":         "berserk",
+      "special_momentum": "execute"
+    }
+  },
+  {
+    "delay_ms": 100,
+    "package": "Char.Casting",
+    "payload": {
+      "active":   1,
+      "spell":    "fireball",
+      "progress": 2.5,
+      "cps":      4.0
+    }
+  },
+  {
+    "delay_ms": 100,
+    "package": "Comm.Channel",
+    "payload": {
+      "chan":   "newbie",
+      "player": "Tester",
+      "msg":    "anyone awake?"
+    }
+  },
+  {
+    "delay_ms": 80,
+    "package": "Comm.Channel",
+    "payload": {
+      "chan":   "newbie",
+      "player": "Veteran",
+      "msg":    "we're here, tester"
+    }
+  },
+  {
+    "delay_ms": 80,
+    "package": "Comm.Channel",
+    "payload": {
+      "chan":   "wanted",
+      "player": "Smith",
+      "msg":    "looking for a tier-3 mining drill"
+    }
+  }
+]

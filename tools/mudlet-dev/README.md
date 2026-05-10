@@ -68,11 +68,51 @@ you can drive it yourself via VNC or `xdotool`.
 
 ## Fake data for layout shots
 
-The `--no-connect` mode is useful for layout-only screenshots: the HUD
-renders in its empty state. To exercise every panel (vitals filled,
-enemies populated, casting in progress, effects badges showing), pass
-`--fake-gmcp` and the harness will inject synthetic GMCP events into
-Mudlet via `runLuaCode` after the package loads.
+`run.sh dev` ships an empty HUD because Mudlet doesn't auto-connect
+on a fresh profile. To exercise every panel (vitals filled, enemies
+populated, casting in progress, effects badges, channel feed)
+without needing a live Icesus connection:
+
+```sh
+./build/build.sh
+./tools/mudlet-dev/run.sh fake
+```
+
+What `fake` mode does:
+
+1. Spawns `tools/mudlet-dev/fake_server.py` on `127.0.0.1:7878` (port
+   overridable with `FAKE_PORT`). The server speaks just enough telnet
+   to negotiate GMCP, then replays a JSON fixture of events as
+   `IAC SB GMCP <package> <json> IAC SE` frames.
+2. Builds a fake-flavoured `dist/Icesus-fake.mpackage` — same package
+   plus a tiny inlined script that calls `connectToServer("127.0.0.1",
+   7878)` half a second after profile load. The real package on disk
+   is untouched. The fake artefact lives in `dist/` and is gitignored.
+3. Launches Mudlet against that package. Mudlet dials the fake server,
+   receives the fixture, the HUD renders.
+4. Screenshots, then tears down Mudlet, Xvfb, and the fake server.
+
+The default fixture is `tools/mudlet-dev/fixtures/default.json`:
+populated vitals, three enemies of varying shapes, momentum +
+special_momentum, mid-cast spell, two effects, three channel lines.
+Override with `FAKE_FIXTURE=path/to/scenario.json`.
+
+Add scenarios by dropping new `.json` files into `fixtures/`. Each is
+an array of:
+
+```json
+{ "delay_ms": 100, "package": "Char.Vitals", "payload": { … } }
+```
+
+`delay_ms` is relative to the previous event. `package` is any GMCP
+module path the package handles (`Char.Vitals`, `Char.Maxstats`,
+`Char.Status`, `Char.Casting`, `Char.EnemyDeath`, `Comm.Channel`).
+`payload` becomes the JSON body of the frame; field names must match
+what the package reads — see `docs/gmcp-reference.md` and the actual
+handlers in `package/Icesus.xml`. Mismatched field names fail
+silently (gauges sit at zero, panels stay empty), so cross-check
+the screenshot against expectations before declaring the fixture
+correct.
 
 ## Connecting to live or dev
 
