@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "0.3.4"
+icesus.version = "0.3.5"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -40,10 +40,10 @@ if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
 icesus.config = {
   borderTop    = 92,     -- banner: identity + EXP (px)
   borderRight  = 360,    -- right column width (px)
-  -- Bottom strip, top → bottom: vitals gauges (32) → exits row (24) →
+  -- Bottom strip, top → bottom: vitals gauges (32) → exits row (28) →
   -- (Mudlet's command line sits below borderBottom). Slimmer than v0.3.3
   -- so the bars stay legible without dominating the screen.
-  borderBottom = 60,     -- vitals (32) + exits (24) + 4 px gap (px)
+  borderBottom = 64,     -- vitals (32) + exits (28) + 4 px gap (px)
   channelLines = 500,
   channelTimes = true,
   -- EXP bar grows with the window but never sprawls past expMaxW so
@@ -300,24 +300,27 @@ function icesus.setupHUD()
     local w = (getMainWindowSize() or 1000) - PAD_H * 2
     if w > expMax then icesus.hud.expGauge:resize(expMax, expH) end
   end
+  -- Slim glass treatment matching the vitals row: vertical gradient,
+  -- 5 px corner radius, dark inner border, 10 pt text. Keeps the banner
+  -- visually consistent with the bottom strip.
   icesus.hud.expGauge.front:setStyleSheet(string.format([[
     background: %s;
-    border: 1px solid #0a0c18;
-    border-radius: 3px;
-  ]], lg(P.expGrad[1], P.expGrad[2])))
+    border: 1px solid rgba(0,0,0,0.45);
+    border-radius: 5px;
+  ]], lgv(P.expGrad[2], P.expGrad[1])))
   icesus.hud.expGauge.back:setStyleSheet(string.format([[
-    background: #0a0c18;
+    background: %s;
     border: 1px solid %s;
-    border-radius: 3px;
-  ]], P.border))
+    border-radius: 5px;
+  ]], P.bgInput, P.border))
   icesus.hud.expGauge.text:setStyleSheet(string.format([[
     color: %s;
     font-family: %s;
-    font-size: 14pt;
-    font-weight: 700;
+    font-size: 11pt;
+    font-weight: 600;
     qproperty-alignment: 'AlignCenter';
   ]], P.textBright, FS))
-  pcall(function() icesus.hud.expGauge.text:setFontSize(12) end)
+  pcall(function() icesus.hud.expGauge.text:setFontSize(10) end)
   icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
 
   -- =====================================================================
@@ -329,7 +332,7 @@ function icesus.setupHUD()
   -- world view → vitals → location → input, in reading order.
   -- The right column ends at -B, so this strip sits left of it.
   -- =====================================================================
-  local LOC_H    = 24
+  local LOC_H    = 28
   local VITALS_H = 32
 
   -- Vitals row at the TOP of the bottom border (closest to the console).
@@ -353,11 +356,11 @@ function icesus.setupHUD()
     color: %s;
     border-top: 1px solid %s;
     font-family: %s;
-    font-size: 12pt;
+    font-size: 14pt;
     qproperty-alignment: 'AlignVCenter';
     padding: 0 14px;
   ]], P.bgPanel, P.text, P.border, FS))
-  pcall(function() icesus.hud.locationLabel:setFontSize(10) end)
+  pcall(function() icesus.hud.locationLabel:setFontSize(13) end)
   icesus.hud.locationLabel:echo([[<span style="color:#555">—</span>]])
 
   -- Slim vertical-gradient gauges. Vertical fill (top brighter, bottom

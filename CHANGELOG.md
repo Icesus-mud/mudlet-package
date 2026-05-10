@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.5 — 2026-05-10
+
+Visual consistency pass: the EXP bar still wore v0.3.3's flat-block
+chrome while the vitals had moved on to slim glass, and the exits row
+font was too small to read at desktop resolution.
+
+- **EXP bar matches the vitals.** Same vertical gradient, same 5 px
+  radius, same dark inner border, same 10 pt text. Bottom and top
+  strips now share one visual language instead of two.
+- **Exits row font bumped 10 → 13 pt.** Row height grew 24 → 28 px to
+  fit; bottom border 60 → 64 px. Room name + area + exit letters now
+  read at a glance instead of squinting.
+
 ## v0.3.4 — 2026-05-10
 
 Bottom-strip rework after the v0.3.3 screenshot showed flat, overly tall
