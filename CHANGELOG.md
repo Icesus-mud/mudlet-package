@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.0.1 — 2026-05-10
+
+Adopt the server's new typed chat packages. Server-side, the legacy
+`Comm.Channel` GMCP bucket was split into four typed packages so
+clients can route by semantics instead of brittle `chan` strings
+(mudlib PR #566).
+
+- **Subscribe to the four new packages** — `Room.Speech` (say /
+  whisper / sing / emote / npc_say), `Comm.Channel.Tell` (private
+  tells), `Comm.Channel.Text` (broadcast channels). The legacy
+  `Comm.Channel` handler is dropped: the server still emits it as
+  back-compat passthrough, so listening to both would
+  double-render.
+- **`Room.Ambient` deliberately ignored.** Third-person NPC
+  narration ("the bear sniffs the air") is already in the main
+  console — mirroring it to the chat panel is what was leaking
+  monster emotes into the player-say feed in v1.0. That bug is
+  now gone.
+- **Emote rendering fixed.** For `kind="emote"` the server already
+  embeds the talker's name in `text`, so the client now renders
+  verbatim instead of double-printing the name.
+- **Self echoes styled.** Own messages render `you: ...` in dim
+  grey instead of guessing from name comparison — uses the new
+  `self=1` flag on each packet.
+- **Headless fixture refreshed** to exercise all four new packages
+  plus a self-echo case.
+
 ## v1.0.0 — 2026-05-10
 
 First stable release. The HUD is feature-complete enough to recommend

@@ -17,7 +17,7 @@
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.0  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.1  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.0"
+icesus.version = "1.0.1"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1185,21 +1185,82 @@ function icesus.onEnemyDeath()
   icesus.refreshEnemies()
 end
 
-function icesus.onChannel()
-  local c = gmcp.Comm and gmcp.Comm.Channel
-  if not c or not icesus.hud or not icesus.hud.channels then return end
-  local mc   = icesus.hud.channels
+-- =============================================================
+-- Chat / speech routing — uses the four typed packages introduced
+-- by the server's gmcp Comm.Channel split (mudlib PR #566):
+--
+--   Room.Speech        — say / whisper / sing / emote / npc_say
+--   Room.Ambient       — third-person NPC narration ("the bear sniffs")
+--   Comm.Channel.Tell  — private 1:1 tells
+--   Comm.Channel.Text  — broadcast channels (chat, sales, news, ...)
+--
+-- The legacy Comm.Channel is still emitted server-side as a back-compat
+-- passthrough; we deliberately do NOT subscribe a handler for it, so
+-- nothing double-renders. Room.Ambient is intentionally dropped — the
+-- text is already in the main console, and that's what was leaking
+-- into the player-say pane before the split.
+-- =============================================================
+
+-- Shared echo helper. tag is the colourised header chunk (channel name,
+-- "tell", or speech kind); body is the rendered "talker: text" string.
+local function echoChannel(tag, body)
+  if not icesus.hud or not icesus.hud.channels then return end
   local time = icesus.config.channelTimes and (os.date("%H:%M ")) or ""
-  local chan = c.chan or "?"
-  local who  = c.player or ""
-  local msg  = c.msg or ""
-  if who ~= "" then
-    mc:cecho(string.format(
-      "<grey>%s<reset><DodgerBlue>[%s]<reset> <gold>%s<reset>: %s\n",
-      time, chan, who, msg))
+  icesus.hud.channels:cecho(string.format(
+    "<grey>%s<reset>%s %s\n", time, tag, body))
+end
+
+-- Render "talker: text" with self echoes styled differently so own
+-- messages stand out without resorting to name comparison.
+local function fmtTalkerText(talker, text, isSelf)
+  if isSelf then
+    return string.format("<DimGrey>you<reset>: %s", text)
+  end
+  return string.format("<gold>%s<reset>: %s", talker or "", text or "")
+end
+
+function icesus.onRoomSpeech()
+  local p = gmcp.Room and gmcp.Room.Speech
+  if not p then return end
+  local kind   = tostring(p.kind or "say")
+  local text   = tostring(p.text or "")
+  local talker = tostring(p.talker or "")
+  local isSelf = (p.self == 1) or (p.self == true)
+  -- For emotes the server has already woven the talker name into the
+  -- text ("Idles waves cheerfully") — render verbatim, do not prepend.
+  if kind == "emote" then
+    echoChannel(string.format("<SteelBlue>[%s]<reset>", kind), text)
   else
-    mc:cecho(string.format("<grey>%s<reset><DodgerBlue>[%s]<reset> %s\n",
-      time, chan, msg))
+    echoChannel(string.format("<DodgerBlue>[%s]<reset>", kind),
+      fmtTalkerText(talker, text, isSelf))
+  end
+end
+
+function icesus.onCommTell()
+  local p = gmcp.Comm and gmcp.Comm.Channel and gmcp.Comm.Channel.Tell
+  if not p then return end
+  local talker = tostring(p.talker or "")
+  local text   = tostring(p.text or "")
+  local isSelf = (p.self == 1) or (p.self == true)
+  echoChannel("<MediumOrchid>[tell]<reset>",
+    fmtTalkerText(talker, text, isSelf))
+end
+
+function icesus.onCommText()
+  local p = gmcp.Comm and gmcp.Comm.Channel and gmcp.Comm.Channel.Text
+  if not p then return end
+  local channel = tostring(p.channel or "?")
+  local talker  = tostring(p.talker or "")
+  local text    = tostring(p.text or "")
+  local kind    = tostring(p.kind or "say")
+  local isSelf  = (p.self == 1) or (p.self == true)
+  -- Channel emotes: text already includes the talker name (parsed by
+  -- EMOTE_D server-side). Render verbatim.
+  if kind == "emote" then
+    echoChannel(string.format("<DodgerBlue>[%s]<reset>", channel), text)
+  else
+    echoChannel(string.format("<DodgerBlue>[%s]<reset>", channel),
+      fmtTalkerText(talker, text, isSelf))
   end
 end
 
@@ -1229,8 +1290,14 @@ function icesus.subscribeGMCP()
   -- Char.Base is listed explicitly even though the server's send_all sends
   -- it regardless of subscription — keeps client intent visible on the
   -- wire and survives any future server-side gating.
+  -- Comm 1 / Room 1 cover the typed chat packages (Comm.Channel.Tell,
+  -- Comm.Channel.Text, Room.Speech, Room.Ambient). The subpackages are
+  -- listed explicitly so the subscription stays self-documenting and
+  -- survives any future server-side per-package gating.
   sendGMCP('Core.Supports.Set ["Char 1", "Char.Base 1", "Char.Vitals 1", '
-        .. '"Char.Status 1", "Char.Cooldowns 1", "Comm 1", "Room 1"]')
+        .. '"Char.Status 1", "Char.Cooldowns 1", '
+        .. '"Comm 1", "Comm.Channel.Tell 1", "Comm.Channel.Text 1", '
+        .. '"Room 1", "Room.Speech 1"]')
 end
 
 -- =============================================================
@@ -1250,8 +1317,10 @@ function icesus.install()
   reg("gmcp.Char.Casting",    icesus.onCasting)
   reg("gmcp.Char.Cooldowns",  icesus.onCooldowns)
   reg("gmcp.Char.EnemyDeath", icesus.onEnemyDeath)
-  reg("gmcp.Room.Info",       icesus.onRoomInfo)
-  reg("gmcp.Comm.Channel",    icesus.onChannel)
+  reg("gmcp.Room.Info",            icesus.onRoomInfo)
+  reg("gmcp.Room.Speech",          icesus.onRoomSpeech)
+  reg("gmcp.Comm.Channel.Tell",    icesus.onCommTell)
+  reg("gmcp.Comm.Channel.Text",    icesus.onCommText)
   reg("sysConnectionEvent",   icesus.subscribeGMCP)
   reg("sysExitEvent",         icesus.uninstall)
   if isConnected and isConnected() then icesus.subscribeGMCP() end

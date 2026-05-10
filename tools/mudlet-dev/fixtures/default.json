@@ -93,29 +93,76 @@
   },
   {
     "delay_ms": 100,
-    "package": "Comm.Channel",
+    "package": "Comm.Channel.Text",
     "payload": {
-      "chan":   "newbie",
-      "player": "Tester",
-      "msg":    "anyone awake?"
+      "channel": "newbie",
+      "talker":  "Tester",
+      "text":    "anyone awake?",
+      "kind":    "say"
     }
   },
   {
     "delay_ms": 80,
-    "package": "Comm.Channel",
+    "package": "Comm.Channel.Text",
     "payload": {
-      "chan":   "newbie",
-      "player": "Veteran",
-      "msg":    "we're here, tester"
+      "channel": "newbie",
+      "talker":  "Veteran",
+      "text":    "we're here, tester",
+      "kind":    "say"
     }
   },
   {
     "delay_ms": 80,
-    "package": "Comm.Channel",
+    "package": "Comm.Channel.Text",
     "payload": {
-      "chan":   "wanted",
-      "player": "Smith",
-      "msg":    "looking for a tier-3 mining drill"
+      "channel": "wanted",
+      "talker":  "Smith",
+      "text":    "looking for a tier-3 mining drill",
+      "kind":    "say"
+    }
+  },
+  {
+    "delay_ms": 80,
+    "package": "Comm.Channel.Text",
+    "payload": {
+      "channel": "chat",
+      "talker":  "Bard",
+      "text":    "Bard cackles madly.",
+      "kind":    "emote"
+    }
+  },
+  {
+    "delay_ms": 80,
+    "package": "Comm.Channel.Tell",
+    "payload": {
+      "talker": "Friend",
+      "text":   "meet me at the gate?"
+    }
+  },
+  {
+    "delay_ms": 80,
+    "package": "Room.Speech",
+    "payload": {
+      "talker": "an old man",
+      "text":   "the wind is fierce tonight",
+      "kind":   "say"
+    }
+  },
+  {
+    "delay_ms": 80,
+    "package": "Room.Speech",
+    "payload": {
+      "talker": "Idles",
+      "text":   "hello there",
+      "kind":   "say",
+      "self":   1
+    }
+  },
+  {
+    "delay_ms": 80,
+    "package": "Room.Ambient",
+    "payload": {
+      "text": "The bull exhales sharply, breath fogging in the cold."
     }
   }
 ]
