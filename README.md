@@ -56,6 +56,21 @@ being negotiated — make sure GMCP is enabled in your profile settings.
 
 Produces `dist/Icesus.mpackage`. Requires Python 3 only.
 
+## Headless Mudlet for development
+
+A maintainer or contributor on a Linux box can run Mudlet under Xvfb,
+install the just-built package, and screenshot the result without
+touching a real desktop. See [`tools/mudlet-dev/README.md`](tools/mudlet-dev/README.md).
+
+```sh
+./tools/mudlet-dev/install.sh      # one-time: deps + Mudlet AppImage
+./build/build.sh && ./tools/mudlet-dev/run.sh dev
+# → tools/mudlet-dev/screenshots/latest.png
+```
+
+This is for layout iteration and regression checks. Final QA still
+happens on real Mudlet on a real desktop.
+
 ## How it works
 
 There's one Lua script (`package/Icesus.xml` → `icesus.core`) under a
