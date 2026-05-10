@@ -17,7 +17,7 @@
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.1  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.3  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.2"
+icesus.version = "1.0.3"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -611,8 +611,8 @@ function icesus.refreshGauges()
     setGaugeGradV(icesus.hud.hp, P.hpGrad)
   end
 
-  -- PSP: lazy-create when max becomes positive; tear down when it drops.
-  -- Style mirrors the slim vertical-gradient vitals built in setupHUD().
+  -- PSP: lazy-create when max becomes positive; hide when it drops back
+  -- to zero so a stale empty gauge can't get stuck in the vitals row.
   if s.pspmax > 0 then
     if not icesus.hud.psp then
       icesus.hud.psp = Geyser.Gauge:new({ name = "icesus.psp" }, icesus.hud.bottom)
@@ -634,8 +634,12 @@ function icesus.refreshGauges()
         qproperty-alignment: 'AlignCenter';
       ]], P.textBright, icesus.fontStack))
       pcall(function() icesus.hud.psp.text:setFontSize(10) end)
+    else
+      icesus.hud.psp:show()
     end
     setG(icesus.hud.psp, s.psp, s.pspmax, "PSP")
+  elseif icesus.hud.psp then
+    icesus.hud.psp:hide()
   end
 end
 
@@ -1294,10 +1298,12 @@ function icesus.subscribeGMCP()
   -- Comm.Channel.Text, Room.Speech, Room.Ambient). The subpackages are
   -- listed explicitly so the subscription stays self-documenting and
   -- survives any future server-side per-package gating.
-  sendGMCP('Core.Supports.Set ["Char 1", "Char.Base 1", "Char.Vitals 1", '
-        .. '"Char.Status 1", "Char.Cooldowns 1", '
+  sendGMCP('Core.Supports.Set ['
+        .. '"Char 1", "Char.Base 1", "Char.Vitals 1", "Char.Maxstats 1", '
+        .. '"Char.Status 1", "Char.Casting 1", "Char.Cooldowns 1", '
+        .. '"Char.EnemyDeath 1", '
         .. '"Comm 1", "Comm.Channel.Tell 1", "Comm.Channel.Text 1", '
-        .. '"Room 1", "Room.Speech 1"]')
+        .. '"Room 1", "Room.Info 1", "Room.Speech 1"]')
 end
 
 -- =============================================================

@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.3 — 2026-05-10
+
+Polish pass surfaced by the Greptile auto-review on the
+[mudlet-package-repository submission](https://github.com/Mudlet/mudlet-package-repository/pull/650).
+
+- **PSP gauge teardown.** `refreshGauges()` lazy-creates the PSP gauge when `pspmax` becomes positive, but never hid it again when `pspmax` later dropped to zero — the empty gauge would stay stuck in the vitals row for the rest of the session. Now the `else` branch hides the gauge, and the recreation path explicitly `:show()`s it again so the gauge reappears cleanly when psionic max comes back.
+- **GMCP subscription list completed.** `subscribeGMCP()` was sending `"Char 1"` and `"Room 1"` as parent subscriptions plus explicit subs for *some* sub-packages, but missing `Char.Maxstats`, `Char.Casting`, `Char.EnemyDeath`, and `Room.Info` — all of which already had registered handlers. Now all explicit sub-packages match the handler list.
+- **Stale version comment.** Script header was `-- v1.0.1` while `icesus.version` had been bumped to `"1.0.2"`. Fixed.
+
 ## v1.0.2 — 2026-05-10
 
 Player-facing copy pass. No code changes.
