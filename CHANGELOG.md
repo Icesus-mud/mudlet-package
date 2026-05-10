@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.2 — 2026-05-10
+
+- **Enemy HP bar renders the block character.** The full-block glyph
+  was sent as raw UTF-8 bytes (`\xe2\x96\x88`) and Mudlet's Qt HTML
+  renderer was mangling them somewhere along the pipeline. Switched
+  to the HTML numeric entity `&#9608;`, which reaches the renderer
+  with the encoding already settled. (#2, thanks @yogurtking — first
+  community PR on the package.)
+
 ## v0.2.1 — 2026-05-09
 
 Hotfix.
