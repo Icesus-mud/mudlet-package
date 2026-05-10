@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.2 — 2026-05-10
+
+Player-facing copy pass. No code changes.
+
+- **`config.lua` description rewritten** for the package manager / packages.mudlet.org listing. Old text opened with "GMCP-driven HUD..." and ended on a list of GMCP package identifiers — accurate but read like developer documentation. New text leads with what Icesus is and what the package keeps visible while you play.
+- **Load banner shortened.** Replaced the lowercase comma-separated subsystem inventory with a single anchor line: "Deep, earned progression in a world that rewards commitment." The version still prints, so the load confirmation is intact.
+
 ## v1.0.1 — 2026-05-10
 
 Adopt the server's new typed chat packages. Server-side, the legacy

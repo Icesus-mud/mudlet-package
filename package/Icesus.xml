@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.1"
+icesus.version = "1.0.2"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1324,10 +1324,9 @@ function icesus.install()
   reg("sysConnectionEvent",   icesus.subscribeGMCP)
   reg("sysExitEvent",         icesus.uninstall)
   if isConnected and isConnected() then icesus.subscribeGMCP() end
-  cecho("\n<lime_green>Icesus<reset> package <yellow>v"
+  cecho("\n<lime_green>Icesus<reset> v"
     .. icesus.version .. "<reset> ready. "
-    .. "<grey>(identity, exp, location, vitals, momentum, casting/busy, "
-    .. "effects, cooldowns, enemies, channels)<reset>\n")
+    .. "<grey>Deep, earned progression in a world that rewards commitment.<reset>\n")
 end
 
 function icesus.uninstall()
