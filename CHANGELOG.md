@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.2 — 2026-05-10
+
+Second pass on font sizes after a real-monitor screenshot. v0.3.1's
+"bigger" pt sizes still rendered ~10 px tall against ~16 px console
+text. Bumped harder this time so the HUD reads at desktop resolution.
+
+- Fonts now: identity 18 pt (was 14), vitals 17 pt (was 13), EXP /
+  cast / momentum / enemies / carry 14 pt (was 12), location 14 pt
+  (was 11), effect & cooldown badges 13 pt (was 10), channels
+  miniconsole 13 pt (was 12).
+- Borders grew to fit: top 72 → 92 px, bottom 74 → 94 px (location
+  28 + vitals 58 + gaps), right column 340 → 360 px.
+- Right-column panel heights bumped proportionally: momentum buttons
+  32 → 38 px, cast bar 26 → 32 px, badge rows 26 → 32 px, enemy
+  panel 200 → 220 px.
+
+Known: a row of 3+ long-named cooldowns (e.g. "breath weapon 90s")
+clips at the right edge again with the bigger pill font. A future
+pass should either truncate the name when many cooldowns are active
+or wrap to a second row.
+
 ## v0.3.1 — 2026-05-10
 
 Follow-up to v0.3.0 after first real-world testing. The HUD looked
