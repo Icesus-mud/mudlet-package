@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.3.1 — 2026-05-10
+
+Follow-up to v0.3.0 after first real-world testing. The HUD looked
+cramped at proper monitor resolutions and a few signals weren't
+flowing through to the user.
+
+- **Bigger type, across the board.** Identity → 14 pt, vitals →
+  13 pt, EXP / cast / momentum / enemies / channels → 12 pt,
+  effect & cooldown badges → 10 pt. Banner border grew from 60 → 72
+  px and bottom border from 46 → 74 px (location row + vitals)
+  to fit. Right column nudged from 320 → 340 px.
+- **Location & exits strip.** New 24 px row above the vitals,
+  fed by `Room.Info`. Renders the room short, area, a teal
+  `SAFE` chip when applicable, and the open exits as short-form
+  cyan letters (`n e s w u`). Cleared to "—" off-grid.
+- **Busy indicator.** `Char.Status.busy` + `activity` (camping,
+  smelting, fishing, …) now repaints the cast bar amber with
+  `busy: <activity>` so non-spell actions get the same visual
+  signal that spells already had. Spell casts still win when both
+  fire at once because they carry real progress.
+- **Identity name plumbing.** `refreshIdentity` now reads
+  `gmcp.Char.Base` directly as a fallback so the name appears
+  even when state hasn't been populated yet (race between hot
+  install and the first `Char.Base` burst). Also subscribes
+  `Char.Base 1` / `Char.Status 1` / `Char.Cooldowns 1` explicitly
+  on the wire — defensive against future server-side gating.
+- **EXP gauge cap.** Caps the EXP bar at `expMaxW` (default 720 px)
+  so the centered label stays close to the eye on widescreen
+  monitors instead of getting marooned in a sea of green.
+
 ## v0.3.0 — 2026-05-10
 
 Visual refresh, ported from the play.icesus.org web client. The HUD

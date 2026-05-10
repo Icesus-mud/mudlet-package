@@ -60,6 +60,17 @@
     }
   },
   {
+    "delay_ms": 80,
+    "package": "Room.Info",
+    "payload": {
+      "name":  "Tavern Square",
+      "area":  "Vaerlon",
+      "exits": ["north", "east", "south", "west", "up"],
+      "safe":  1,
+      "id":    "abc12345"
+    }
+  },
+  {
     "delay_ms": 100,
     "package": "Char.Cooldowns",
     "payload": {

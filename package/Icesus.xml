@@ -17,7 +17,7 @@
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v0.3.0  •  https://github.com/Icesus-mud/mudlet-package
+-- v0.3.1  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -29,7 +29,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "0.3.0"
+icesus.version = "0.3.1"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -38,11 +38,14 @@ if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
 -- Config — tweak in your private session, or PR upstream defaults.
 -- =============================================================
 icesus.config = {
-  borderTop    = 60,     -- banner: identity + EXP (px)
-  borderRight  = 320,    -- right column width (px)
-  borderBottom = 40,     -- vitals row height (px)
+  borderTop    = 72,     -- banner: identity + EXP (px)
+  borderRight  = 340,    -- right column width (px)
+  borderBottom = 74,     -- location strip (24) + vitals (46) + gap (px)
   channelLines = 500,
   channelTimes = true,
+  -- EXP bar grows with the window but never sprawls past expMaxW so
+  -- the value text stays close to the eye on widescreens.
+  expMaxW      = 720,
 }
 
 -- =============================================================
@@ -120,6 +123,8 @@ icesus.state = {
   momentum        = "",
   specialMomentum = "",
   casting         = nil,    -- { spell, progress, cps } when active
+  busy            = nil,    -- { activity = "camping" } when set_busy active
+  room            = { name = "", area = "", exits = {}, safe = false },
   inCombat        = false,
   hpCritical      = false,  -- drives pulse timer
   pulseOn         = false,  -- toggled by tempTimer
@@ -232,9 +237,9 @@ function icesus.setupHUD()
     border-bottom: 1px solid #1a3050;
   ]])
 
-  local PAD_H = 14
-  local idH   = 24
-  local expH  = 22
+  local PAD_H = 16
+  local idH   = 30
+  local expH  = 26
 
   -- Identity (left half of banner row 1).
   icesus.hud.identityLabel = Geyser.Label:new({
@@ -245,7 +250,7 @@ function icesus.setupHUD()
     background: transparent;
     color: %s;
     font-family: %s;
-    font-size: 11pt;
+    font-size: 14pt;
     qproperty-alignment: 'AlignLeft | AlignVCenter';
     padding: 0;
   ]], P.text, FS))
@@ -259,16 +264,25 @@ function icesus.setupHUD()
     background: transparent;
     color: %s;
     font-family: %s;
-    font-size: 10pt;
+    font-size: 12pt;
     qproperty-alignment: 'AlignRight | AlignVCenter';
     padding: 0;
   ]], P.textDim, FS))
 
-  -- EXP gauge (banner row 2). Geyser.Gauge with green gradient.
+  -- EXP gauge (banner row 2). Geyser.Gauge with forest gradient.
+  -- Cap width on widescreens so the centred label stays near the eye.
+  local expMax = icesus.config.expMaxW or 720
+  local expW   = string.format("100%%-%d", PAD_H * 2)
   icesus.hud.expGauge = Geyser.Gauge:new({
     name = "icesus.expGauge",
-    x = PAD_H, y = 6 + idH + 2, width = "100%-" .. (PAD_H * 2), height = expH,
+    x = PAD_H, y = 6 + idH + 4, width = expW, height = expH,
   }, icesus.hud.banner)
+  -- Mudlet honours numeric width when a percentage would overflow
+  -- expMax; we re-resize after construction so the cap kicks in.
+  if icesus.hud.expGauge.resize and getMainWindowSize then
+    local w = (getMainWindowSize() or 1000) - PAD_H * 2
+    if w > expMax then icesus.hud.expGauge:resize(expMax, expH) end
+  end
   icesus.hud.expGauge.front:setStyleSheet(string.format([[
     background: %s;
     border: 1px solid #0a0c18;
@@ -282,21 +296,43 @@ function icesus.setupHUD()
   icesus.hud.expGauge.text:setStyleSheet(string.format([[
     color: %s;
     font-family: %s;
-    font-size: 9pt;
+    font-size: 12pt;
     font-weight: 600;
     qproperty-alignment: 'AlignCenter';
   ]], P.textBright, FS))
   icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
 
   -- =====================================================================
-  -- BOTTOM BAR — vitals (HP / SP / EP, +PSP if max>0).
-  -- HBox with up-to-four gauges; layout adapts when PSP appears.
+  -- BOTTOM BAR — two strips, both anchored to the absolute bottom.
+  --   y = -72 .. -50  : location + exits row
+  --   y = -46 .. 0    : vitals (HP / SP / EP, +PSP if max>0)
+  -- The right column ends at -B, so this strip sits left of it.
   -- =====================================================================
+  local LOC_H    = 24
+  local VITALS_H = 46
+
+  icesus.hud.locationLabel = Geyser.Label:new({
+    name = "icesus.locationLabel",
+    x = 0, y = "-" .. (VITALS_H + LOC_H + 4),
+    width = "100%-" .. R,
+    height = LOC_H,
+  })
+  icesus.hud.locationLabel:setStyleSheet(string.format([[
+    background: %s;
+    color: %s;
+    border-top: 1px solid %s;
+    font-family: %s;
+    font-size: 11pt;
+    qproperty-alignment: 'AlignVCenter';
+    padding: 0 14px;
+  ]], P.bgPanel, P.text, P.border, FS))
+  icesus.hud.locationLabel:echo([[<span style="color:#555">—</span>]])
+
   icesus.hud.bottom = Geyser.HBox:new({
     name = "icesus.bottom",
-    x = 0, y = "-" .. B,
+    x = 0, y = "-" .. VITALS_H,
     width = "100%-" .. R,
-    height = B,
+    height = VITALS_H,
   })
 
   local function makeGauge(key, label, grad)
@@ -314,8 +350,8 @@ function icesus.setupHUD()
     g.text:setStyleSheet(string.format([[
       color: %s;
       font-family: %s;
-      font-size: 10pt;
-      font-weight: 600;
+      font-size: 13pt;
+      font-weight: 700;
       letter-spacing: 0.5px;
       qproperty-alignment: 'AlignCenter';
     ]], P.textBright, FS))
@@ -353,10 +389,10 @@ function icesus.setupHUD()
   ]], P.bgMain, P.border))
 
   local PAD       = 6
-  local BTN_H     = 28
-  local CAST_H    = 22
-  local BADGES_H  = 22
-  local ENEMY_H   = 180
+  local BTN_H     = 32
+  local CAST_H    = 26
+  local BADGES_H  = 26
+  local ENEMY_H   = 200
   local btnY       = PAD                                    -- 6
   local castY      = btnY      + BTN_H    + PAD             -- 40
   local effectsY   = castY     + CAST_H   + PAD             -- 68
@@ -377,7 +413,7 @@ function icesus.setupHUD()
       border: 1px solid %s;
       border-radius: 4px;
       font-family: %s;
-      font-size: 10pt;
+      font-size: 12pt;
       qproperty-alignment: 'AlignCenter';
     ]], P.textDim, P.border, FS))
     btn:echo([[<center><span>—</span></center>]])
@@ -407,7 +443,8 @@ function icesus.setupHUD()
   icesus.hud.castGauge.text:setStyleSheet(string.format([[
     color: %s;
     font-family: %s;
-    font-size: 9pt;
+    font-size: 12pt;
+    font-weight: 600;
     qproperty-alignment: 'AlignCenter';
   ]], P.textBright, FS))
   icesus.hud.castGauge:setValue(0, 1, "—")
@@ -426,7 +463,7 @@ function icesus.setupHUD()
       border: 1px solid %s;
       border-radius: 3px;
       font-family: %s;
-      font-size: 9pt;
+      font-size: 11pt;
       qproperty-alignment: 'AlignCenter';
     ]], P.bgPanel, P.textDim, P.border, FS))
     return lbl
@@ -449,7 +486,7 @@ function icesus.setupHUD()
     border: 1px solid %s;
     border-radius: 3px;
     font-family: %s;
-    font-size: 10pt;
+    font-size: 12pt;
     qproperty-alignment: 'AlignTop';
     padding: 4px;
   ]], P.bgPanel, P.text, P.border, FS))
@@ -463,7 +500,7 @@ function icesus.setupHUD()
     width = R - PAD * 2,
     height = "100%-" .. (channelsY + PAD),
     autoWrap = true,
-    fontSize = 10,
+    fontSize = 12,
     color = P.bgDeep,
   }, icesus.hud.right)
   icesus.hud.channels:setBufferSize(icesus.config.channelLines, icesus.config.channelLines)
@@ -574,17 +611,26 @@ function icesus.refreshIdentity()
   if not icesus.hud or not icesus.hud.identityLabel then return end
   local P  = icesus.palette
   local id = icesus.state.identity
-  local name = id.name ~= "" and id.name or "—"
+
+  -- Fallback: pull straight from the live GMCP table when state hasn't
+  -- been populated yet (race between hot install + first Char.Base burst).
+  local b = (gmcp and gmcp.Char and gmcp.Char.Base) or {}
+  local name  = id.name  ~= "" and id.name  or (b.name  or "")
+  local race  = id.race  ~= "" and id.race  or (b.race  or "")
+  local guild = id.guild ~= "" and id.guild or (b.class or b.guild or "")
+
+  if name == "" then name = "(connecting…)" end
+
   local meta = {}
   if id.level and id.level > 0 then table.insert(meta, "Lvl " .. id.level) end
-  if id.race  and id.race  ~= "" then table.insert(meta, htmlEscape(id.race))  end
-  if id.guild and id.guild ~= "" then table.insert(meta, htmlEscape(id.guild)) end
+  if race  ~= "" then table.insert(meta, htmlEscape(race))  end
+  if guild ~= "" then table.insert(meta, htmlEscape(guild)) end
   local sep = string.format(
     [[<span style="color:%s">&nbsp;&middot;&nbsp;</span>]], P.borderBright)
   icesus.hud.identityLabel:echo(string.format(
     [[<span style="color:%s;font-weight:700;letter-spacing:0.5px">%s</span>]]
-    .. [[<span style="color:%s">&nbsp;&nbsp;</span>]]
-    .. [[<span style="color:%s;font-size:9pt">%s</span>]],
+    .. [[<span style="color:%s">&nbsp;&nbsp;&nbsp;</span>]]
+    .. [[<span style="color:%s;font-size:11pt">%s</span>]],
     P.iceBright, htmlEscape(name),
     P.borderBright,
     P.textDim, table.concat(meta, sep)))
@@ -717,15 +763,33 @@ end
 
 function icesus.refreshCasting()
   if not icesus.hud or not icesus.hud.castGauge then return end
+  local P = icesus.palette
   local c = icesus.state.casting
-  if not c then
-    icesus.hud.castGauge:setValue(0, 1, "—")
+  local b = icesus.state.busy
+
+  -- Spell casting wins over a generic busy state because Char.Casting
+  -- carries real progress and the bar is more useful filled accurately.
+  if c then
+    setGaugeGrad(icesus.hud.castGauge, P.castGrad)
+    local total = math.max(tonumber(c.cps) or 1, 1)
+    local prog  = math.min(math.max(tonumber(c.progress) or 0, 0), total)
+    icesus.hud.castGauge:setValue(prog, total,
+      "casting " .. (c.spell or ""))
     return
   end
-  local total = math.max(tonumber(c.cps) or 1, 1)
-  local prog  = math.min(math.max(tonumber(c.progress) or 0, 0), total)
-  icesus.hud.castGauge:setValue(prog, total,
-    "casting " .. (c.spell or ""))
+
+  -- Busy (camping, smelting, fishing, …): no progress info from the
+  -- server, just a state. Fill the bar amber so it reads as
+  -- "you can't do other things right now".
+  if b then
+    setGaugeGrad(icesus.hud.castGauge, { "#7c5314", "#d97706" })
+    local label = b.activity ~= "" and b.activity or "busy"
+    icesus.hud.castGauge:setValue(1, 1, "busy: " .. label)
+    return
+  end
+
+  setGaugeGrad(icesus.hud.castGauge, P.castGrad)
+  icesus.hud.castGauge:setValue(0, 1, "—")
 end
 
 function icesus.refreshEffects()
@@ -741,10 +805,10 @@ function icesus.refreshEffects()
     local style = effectStyle(e)
     table.insert(parts, string.format(
       [[<span style="background:%s;color:%s;border:1px solid %s;]]
-      .. [[padding:0px 6px;border-radius:3px;font-size:8pt;font-weight:700;]]
+      .. [[padding:1px 8px;border-radius:3px;font-size:10pt;font-weight:700;]]
       .. [[letter-spacing:0.5px">%s</span>]],
       style.bg, style.fg, style.bd, htmlEscape(e):upper()))
-    if i < #fx then table.insert(parts, [[<span>&nbsp;</span>]]) end
+    if i < #fx then table.insert(parts, [[<span>&nbsp;&nbsp;</span>]]) end
   end
   table.insert(parts, [[</center>]])
   icesus.hud.effectsRow:echo(table.concat(parts))
@@ -787,7 +851,7 @@ function icesus.refreshCooldowns()
     local name  = htmlEscape(c.name):gsub(" ", "&nbsp;")
     table.insert(parts, string.format(
       [[<span style="background:%s;color:%s;border:1px solid %s;]]
-      .. [[padding:0px 5px;border-radius:3px;font-size:8pt;font-weight:700;]]
+      .. [[padding:1px 6px;border-radius:3px;font-size:10pt;font-weight:700;]]
       .. [[letter-spacing:0.3px">%s <span style="opacity:0.65">%ds</span></span>]],
       style.bg, style.fg, style.bd, name, rem))
     if i < #cds then table.insert(parts, [[<span>&nbsp;</span>]]) end
@@ -901,6 +965,16 @@ function icesus.onStatus()
   -- effects
   icesus.state.effects = (type(s.effects) == "table") and s.effects or {}
   icesus.refreshEffects()
+
+  -- Busy state (camping, smelting, fishing, etc.) — a non-spell action
+  -- that blocks input. Char.Casting carries spells; Char.Status.busy
+  -- + activity carries everything else. Both feed the cast bar.
+  if s.busy == 1 or s.busy == true then
+    icesus.state.busy = { activity = tostring(s.activity or "") }
+  else
+    icesus.state.busy = nil
+  end
+  icesus.refreshCasting()
 end
 
 function icesus.onCasting()
@@ -916,6 +990,101 @@ function icesus.onCasting()
     icesus.state.casting = nil
   end
   icesus.refreshCasting()
+end
+
+-- Mirror of webclient's exit-list normaliser: Room.Info v2 ships exits
+-- as a mapping (dir -> destination); v1 ships an array of dirs. Either
+-- shape collapses into an ordered list of direction names.
+local DIR_ORDER = { "north", "south", "east", "west",
+                    "northeast", "northwest", "southeast", "southwest",
+                    "up", "down", "in", "out" }
+local DIR_SHORT = {
+  north = "n",  south = "s",  east = "e",  west = "w",
+  northeast = "ne", northwest = "nw",
+  southeast = "se", southwest = "sw",
+  up = "u",  down = "d",  ["in"] = "in", out = "out",
+}
+
+local function normaliseExits(raw)
+  local out = {}
+  if type(raw) == "table" then
+    -- mapping form: { north = "/some/dest", ... }
+    for _, dir in ipairs(DIR_ORDER) do
+      if raw[dir] ~= nil then table.insert(out, dir) end
+    end
+    -- array form: { "north", "south", ... } — anything not picked above
+    for _, v in ipairs(raw) do
+      if type(v) == "string" then
+        local seen = false
+        for _, d in ipairs(out) do if d == v then seen = true; break end end
+        if not seen then table.insert(out, v) end
+      end
+    end
+  end
+  return out
+end
+
+function icesus.refreshRoom()
+  if not icesus.hud or not icesus.hud.locationLabel then return end
+  local P = icesus.palette
+  local r = icesus.state.room
+  if (r.name == "" or r.name == nil) and #r.exits == 0 then
+    icesus.hud.locationLabel:echo([[<span style="color:#555">—</span>]])
+    return
+  end
+
+  local left = {}
+  if r.safe then
+    table.insert(left, string.format(
+      [[<span style="color:#5eead4;font-weight:700;font-size:9pt;]]
+      .. [[border:1px solid rgba(94,234,212,0.4);padding:1px 6px;]]
+      .. [[border-radius:3px">SAFE</span>]]))
+  end
+  if r.name ~= "" then
+    table.insert(left, string.format(
+      [[<span style="color:%s;font-weight:600">%s</span>]],
+      P.iceBright, htmlEscape(r.name)))
+  end
+  if r.area ~= "" and r.area ~= "Unknown" then
+    table.insert(left, string.format(
+      [[<span style="color:%s;font-size:10pt">%s</span>]],
+      P.textDim, htmlEscape(r.area)))
+  end
+
+  local sep = string.format(
+    [[<span style="color:%s">&nbsp;&middot;&nbsp;</span>]], P.borderBright)
+
+  local exits = {}
+  for _, d in ipairs(r.exits) do
+    table.insert(exits, string.format(
+      [[<span style="color:%s;font-weight:700">%s</span>]],
+      P.ice, DIR_SHORT[d] or htmlEscape(d)))
+  end
+  local exitText = ""
+  if #exits > 0 then
+    exitText = string.format(
+      [[<span style="color:%s">exits:</span>&nbsp;%s]],
+      P.textDim, table.concat(exits, "&nbsp;"))
+  end
+
+  -- HTML table keeps the location flush left and the exits flush right
+  -- in the same row even though Geyser.Label has no flex layout.
+  icesus.hud.locationLabel:echo(string.format(
+    [[<table width="100%%" cellspacing="0" cellpadding="0">]]
+    .. [[<tr><td align="left">%s</td>]]
+    .. [[<td align="right">%s</td></tr></table>]],
+    table.concat(left, sep), exitText))
+end
+
+function icesus.onRoomInfo()
+  local r = gmcp.Room and gmcp.Room.Info
+  if not r then return end
+  local s = icesus.state.room
+  if r.name ~= nil then s.name = tostring(r.name) end
+  if r.area ~= nil then s.area = tostring(r.area) end
+  s.exits = normaliseExits(r.exits)
+  s.safe  = (r.safe == 1) or (r.safe == true)
+  icesus.refreshRoom()
 end
 
 function icesus.onCooldowns()
@@ -987,7 +1156,11 @@ end
 -- =============================================================
 function icesus.subscribeGMCP()
   sendGMCP('Core.Hello { "client": "Mudlet", "version": "' .. icesus.version .. '" }')
-  sendGMCP('Core.Supports.Set ["Char 1", "Char.Vitals 1", "Comm 1", "Room 1"]')
+  -- Char.Base is listed explicitly even though the server's send_all sends
+  -- it regardless of subscription — keeps client intent visible on the
+  -- wire and survives any future server-side gating.
+  sendGMCP('Core.Supports.Set ["Char 1", "Char.Base 1", "Char.Vitals 1", '
+        .. '"Char.Status 1", "Char.Cooldowns 1", "Comm 1", "Room 1"]')
 end
 
 -- =============================================================
@@ -1007,14 +1180,15 @@ function icesus.install()
   reg("gmcp.Char.Casting",    icesus.onCasting)
   reg("gmcp.Char.Cooldowns",  icesus.onCooldowns)
   reg("gmcp.Char.EnemyDeath", icesus.onEnemyDeath)
+  reg("gmcp.Room.Info",       icesus.onRoomInfo)
   reg("gmcp.Comm.Channel",    icesus.onChannel)
   reg("sysConnectionEvent",   icesus.subscribeGMCP)
   reg("sysExitEvent",         icesus.uninstall)
   if isConnected and isConnected() then icesus.subscribeGMCP() end
   cecho("\n<lime_green>Icesus<reset> package <yellow>v"
     .. icesus.version .. "<reset> ready. "
-    .. "<grey>(identity, exp, vitals, momentum, casting, effects, "
-    .. "cooldowns, enemies, channels)<reset>\n")
+    .. "<grey>(identity, exp, location, vitals, momentum, casting/busy, "
+    .. "effects, cooldowns, enemies, channels)<reset>\n")
 end
 
 function icesus.uninstall()
