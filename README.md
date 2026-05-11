@@ -19,7 +19,7 @@ row — without writing your own triggers.
 Mudlet's Package Manager → Install. That imports the script directly
 without going through `.mpackage`.
 
-The package emits a green `Icesus package v1.0.0 ready.` line on load.
+The package emits a green `Icesus package v1.0.x ready.` line on load.
 If you don't see vitals updating, the most likely cause is GMCP not
 being negotiated — make sure GMCP is enabled in your profile settings.
 
@@ -63,6 +63,46 @@ being negotiated — make sure GMCP is enabled in your profile settings.
 The HUD reserves 360 px on the right, 92 px on top (banner), and 64 px
 on the bottom (vitals + exits). The main console fills everything else
 and renders untouched, so existing prompts and scripts still work.
+
+## Mapper
+
+Press **F11** to open Mudlet's standalone mapper window. The package
+drives it from `Room.Info`: as you walk, rooms are added, exits are
+linked, and overworld grid rooms land at their server-provided
+coordinates. No trigger-writing required.
+
+What's plumbed in:
+
+- **Rooms.** Each server room ships a stable 8-char hex `id`; the
+  package keeps a hex → Mudlet-int mapping in
+  `<profile>/Icesus.idmap.lua` so room numbering survives reconnects.
+- **Exits.** Cardinal exits (`n/ne/e/se/s/sw/w/nw/up/down/in/out`) use
+  Mudlet's normal exit lines; non-cardinal commands like
+  `enter shop` become special exits. Shrouded or dynamic
+  destinations render as direction stubs — you see the option without
+  learning the target.
+- **Indoor layout.** Server only ships absolute coordinates for the
+  outworld grid. Indoor rooms anchor at `(0,0,0)` from your starting
+  location and lay out by direction offsets as you walk, so the graph
+  reads naturally instead of stacking at the origin.
+- **Outworld.** Server ships absolute `(x, y)` for grid tiles; placed
+  with Mudlet's geographic convention (north is up).
+- **Mapper-hostile rooms** (the `/void/` rifts, pre-nether) are
+  silently skipped — those rooms don't pollute the map.
+- **Persistence.** The map saves every 30 seconds and on clean
+  disconnect to `<profile>/Icesus.map.dat`. Reconnect and your map
+  is right back.
+
+If the map gets visually corrupted — most often after upgrading from
+a pre-v1.0.5 build where rooms were placed upside-down — type:
+
+```
+mapper reset
+```
+
+That wipes the saved map and ID table; the next room you enter starts
+a fresh graph. The reset is per-profile, so different characters keep
+their own maps.
 
 ## Building
 
@@ -109,7 +149,9 @@ GMCP packages subscribed via `Core.Supports.Set`:
 `Char.Cooldowns` are listed explicitly even though the server's
 `send_all` sends them regardless — keeps client intent visible on
 the wire and survives any future server-side gating. `Comm 1`
-covers `Comm.Channel`. `Room 1` feeds the location/exits row.
+covers `Comm.Channel.Tell` and `Comm.Channel.Text`. `Room 1` feeds
+both the location/exits row and the F11 mapper (`Room.Info` carries
+the `id`, `exits`, and `coords` that the mapper reads).
 
 The full GMCP spec lives in the mudlib at `doc/help/gmcp.doc`; a
 public mirror is in `docs/gmcp-reference.md` here.
@@ -130,8 +172,10 @@ The next features in priority order, all of them welcome PRs:
 1. **Channel gagging from the main window** — currently channels are
    mirrored, not routed. A trigger group that gags `Comm.Channel`-paired
    text lines would let players use the side console exclusively.
-2. **Outworld minimap** — Geyser miniconsole rendering the LOS-visible
-   grid. Render-only first, fog-of-war later.
+2. **HUD minimap panel** — the F11 mapper already works; an embedded
+   Geyser miniconsole tied to the same map (or rendering the
+   LOS-visible grid alongside it) would keep cartography visible
+   without juggling windows.
 3. **Party panel** — `Party.Info` with HP bars per member.
 4. **Sound pack** — level-up, channel mention, death, combat-enter cues.
 5. **Theme switcher** — light / dark / high-contrast.
