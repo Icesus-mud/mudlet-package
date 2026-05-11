@@ -29,7 +29,7 @@ end</script>
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.4  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.5  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -41,7 +41,7 @@ end</script>
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.4"
+icesus.version = "1.0.5"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1201,15 +1201,16 @@ local CARDINALS = {
   up=true, down=true, ["in"]=true, out=true,
 }
 
--- Per-direction offsets in Mudlet's mapper coord system (+y = south).
+-- Per-direction offsets in Mudlet's mapper coord system (+y = north,
+-- the geographic convention where north sits at the top of the map).
 -- Used for indoor rooms where the server ships no coords — we lay them
 -- out relative to the room the player just left so the topology shows
 -- up on screen instead of every room piling on top of (0,0,0).
 local DIR_OFFSET = {
-  north     = { 0, -1, 0 }, south     = { 0,  1, 0 },
+  north     = { 0,  1, 0 }, south     = { 0, -1, 0 },
   east      = { 1,  0, 0 }, west      = {-1,  0, 0 },
-  northeast = { 1, -1, 0 }, northwest = {-1, -1, 0 },
-  southeast = { 1,  1, 0 }, southwest = {-1,  1, 0 },
+  northeast = { 1,  1, 0 }, northwest = {-1,  1, 0 },
+  southeast = { 1, -1, 0 }, southwest = {-1, -1, 0 },
   up        = { 0,  0, 1 }, down      = { 0,  0,-1 },
   ["in"]    = { 0,  0, 0 }, out       = { 0,  0, 0 },
 }
@@ -1304,8 +1305,9 @@ function icesus.mapper.onRoomInfo(r)
     if areaId and areaId > 0 then pcall(setRoomArea, roomId, areaId) end
   end
 
-  -- Coords. Outworld grid rooms get absolute server coords (server's
-  -- y grows southward, matching Mudlet's +y convention). Indoor rooms
+  -- Coords. Outworld grid rooms get absolute server coords with Y
+  -- flipped: the server's y grows southward (top-down array index),
+  -- Mudlet's grows northward (geographic convention). Indoor rooms
   -- ship no coords — we anchor the very first room at (0,0,0) and
   -- spread the rest by direction offsets when their exits are
   -- processed below.
@@ -1315,8 +1317,8 @@ function icesus.mapper.onRoomInfo(r)
     local y = tonumber(r.coords[2])
     local z = tonumber(r.coords[3] or 0) or 0
     if x and y then
-      pcall(setRoomCoordinates, roomId, x, y, z)
-      m.placed[hexId] = { x, y, z }
+      pcall(setRoomCoordinates, roomId, x, -y, z)
+      m.placed[hexId] = { x, -y, z }
     end
   end
   if not m.placed[hexId] then

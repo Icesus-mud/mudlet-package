@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.5 — 2026-05-11
+
+Mapper Y-axis fix. v1.0.4 placed rooms below their parent when the
+player walked north (and below-east when walking northeast). Mudlet
+uses geographic convention (+y = north on screen) but the package
+was coded with array convention (+y = south).
+
+- **`DIR_OFFSET` table sign-flipped on the Y axis.** north now
+  contributes +1, south -1; northeast / northwest / southeast /
+  southwest follow.
+- **Outworld coords flipped on the Y axis.** The server's `coords`
+  uses array convention (positive y = further south on the world
+  grid) — we now pass `-y` to `setRoomCoordinates` so the outworld
+  draws with north up.
+
+**Existing v1.0.4 users:** type `mapper reset` in-game after
+upgrading to discard the mirror-image map; new walks then build a
+correctly oriented graph.
+
 ## v1.0.4 — 2026-05-11
 
 Drive Mudlet's built-in mapper from `gmcp.Room.Info` so `F11` shows a
