@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.6 — 2026-05-11
+
+- **`mapper reset` no longer breaks the mapper.** Two bugs landed
+  together: the reset rebuilt `idMap` without the `placed` table
+  (next room → error in indoor positioning) and `deleteMap()` left
+  Mudlet's player-room pointer dangling, which segfaulted Mudlet
+  on the next `centerview()`. Reset now walks `idToRoom` and calls
+  `deleteRoom()` per id instead — slower but stable — and the new
+  `idMap` includes `placed`.
+- **Mapper errors surface in the main console.** Wrapping
+  `icesus.mapper.onRoomInfo` in a bare `pcall` was hiding bugs
+  like the one above. Now any error from the mapper path prints
+  to the main console in red, so future failures are obvious
+  instead of mysterious.
+
 ## v1.0.5 — 2026-05-11
 
 Mapper Y-axis fix. v1.0.4 placed rooms below their parent when the

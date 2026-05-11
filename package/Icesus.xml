@@ -29,7 +29,7 @@ end</script>
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.5  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.6  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -41,7 +41,7 @@ end</script>
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.5"
+icesus.version = "1.0.6"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1172,7 +1172,10 @@ function icesus.onRoomInfo()
   s.safe  = (r.safe == 1) or (r.safe == true)
   icesus.refreshRoom()
   if icesus.mapper and icesus.mapper.onRoomInfo then
-    pcall(icesus.mapper.onRoomInfo, r)
+    local ok, err = pcall(icesus.mapper.onRoomInfo, r)
+    if not ok then
+      cecho("\n<red>icesus.mapper error:<reset> " .. tostring(err) .. "\n")
+    end
   end
 end
 
@@ -1420,11 +1423,20 @@ function icesus.mapper.flushSave()
 end
 
 function icesus.mapper.reset()
-  if deleteMap then pcall(deleteMap) end
+  -- deleteMap() is the obvious choice but it leaves Mudlet's player-
+  -- room pointer dangling and the next centerview() segfaults the
+  -- whole client. Walk our own idToRoom and delete rooms one at a
+  -- time instead — slower but stable.
+  if icesus.mapper.idMap and deleteRoom then
+    for _, rid in pairs(icesus.mapper.idMap.idToRoom or {}) do
+      pcall(deleteRoom, rid)
+    end
+  end
   if os.remove then pcall(os.remove, mapDataPath()) end
   if os.remove then pcall(os.remove, idMapPath()) end
-  icesus.mapper.idMap = { idToRoom = {}, areaToInt = {}, next_id = 1 }
+  icesus.mapper.idMap = { idToRoom = {}, areaToInt = {}, placed = {}, next_id = 1 }
   icesus.mapper.dirty = false
+  if updateMap then pcall(updateMap) end
   cecho("\n<lime_green>Icesus<reset> mapper reset \226\128\148 the next room you enter will start a fresh map.\n")
 end
 
