@@ -29,7 +29,7 @@ end</script>
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.6  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.7  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -41,7 +41,7 @@ end</script>
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.6"
+icesus.version = "1.0.7"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1467,6 +1467,84 @@ function icesus.mapper.teardown()
   icesus.mapper.flushSave()
 end
 
+-- =============================================================
+-- Self-update — once per session, fetch the latest version from
+-- the GitHub master branch and re-install if it's newer than the
+-- one currently loaded. Uses downloadFile + sysDownloadDone so it's
+-- non-blocking. Players can disable by setting
+-- icesus.config.autoUpdate = false before the package loads.
+-- =============================================================
+
+icesus.update = icesus.update or {}
+icesus.config.autoUpdate = (icesus.config.autoUpdate ~= false)
+
+local VERSION_URL = "https://raw.githubusercontent.com/Icesus-mud/mudlet-package/master/package/config.lua"
+local RELEASE_URL = "https://github.com/Icesus-mud/mudlet-package/releases/latest/download/Icesus.mpackage"
+
+local function versionCachePath()
+  return getMudletHomeDir() .. "/Icesus.version.check"
+end
+
+-- "1.0.10" > "1.0.9" — naive string compare fails; do a numeric one.
+local function parseVersion(s)
+  if type(s) ~= "string" then return nil end
+  local out = {}
+  for n in s:gmatch("(%d+)") do table.insert(out, tonumber(n)) end
+  return out
+end
+
+local function versionNewer(a, b)
+  local pa, pb = parseVersion(a), parseVersion(b)
+  if not pa or not pb then return false end
+  for i = 1, math.max(#pa, #pb) do
+    local x, y = pa[i] or 0, pb[i] or 0
+    if x > y then return true end
+    if x < y then return false end
+  end
+  return false
+end
+
+function icesus.update.check()
+  if not downloadFile or not registerAnonymousEventHandler then return end
+  if icesus.update.checking then return end
+  icesus.update.checking = true
+
+  local cache = versionCachePath()
+  local doneHandler, errHandler
+
+  local function cleanup()
+    if doneHandler then pcall(killAnonymousEventHandler, doneHandler) end
+    if errHandler  then pcall(killAnonymousEventHandler, errHandler) end
+    icesus.update.checking = false
+  end
+
+  doneHandler = registerAnonymousEventHandler("sysDownloadDone", function(_, file)
+    if file ~= cache then return end
+    cleanup()
+    local f = io.open(cache, "r")
+    if not f then return end
+    local body = f:read("*a"); f:close()
+    pcall(os.remove, cache)
+    local latest = body and body:match('version%s*=%s*"([^"]+)"')
+    if not latest then return end
+    if versionNewer(latest, icesus.version) then
+      cecho(string.format(
+        "\n<yellow>Icesus<reset> update available: <lime_green>v%s<reset> "
+        .. "(you have v%s). Installing\226\128\166\n", latest, icesus.version))
+      -- Defer the re-install so this callback's stack isn't killed
+      -- mid-execution by the package's own uninstall path.
+      tempTimer(0, function() pcall(installPackage, RELEASE_URL) end)
+    end
+  end)
+
+  errHandler = registerAnonymousEventHandler("sysDownloadError", function(_, _, file)
+    if file ~= cache then return end
+    cleanup()
+  end)
+
+  pcall(downloadFile, cache, VERSION_URL)
+end
+
 function icesus.onCooldowns()
   local d = gmcp.Char and gmcp.Char.Cooldowns
   if not d then return end
@@ -1640,6 +1718,11 @@ function icesus.install()
   cecho("\n<lime_green>Icesus<reset> v"
     .. icesus.version .. "<reset> ready. "
     .. "<grey>Deep, earned progression in a world that rewards commitment.<reset>\n")
+  -- Background self-update check. Delayed 10s so the load banner is
+  -- read first and any startup churn settles before we ask GitHub.
+  if icesus.config.autoUpdate and tempTimer then
+    tempTimer(10, function() pcall(icesus.update.check) end)
+  end
 end
 
 function icesus.uninstall()

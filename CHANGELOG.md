@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.7 — 2026-05-11
+
+- **One-liner install.** README now leads with
+  `lua installPackage("…releases/latest/download/Icesus.mpackage")`
+  so players never have to leave the Mudlet command line.
+- **Self-update on session start.** New `icesus.update` module
+  fetches the GitHub master `config.lua` 10 seconds after the load
+  banner, parses the version, and if it's newer than the installed
+  build calls `installPackage(URL)` (deferred via `tempTimer(0)`
+  so the re-install doesn't kill the in-flight callback). Default
+  on; set `icesus.config.autoUpdate = false` to opt out. Uses
+  `downloadFile` + `sysDownloadDone` so the check is non-blocking
+  and silently no-ops if GitHub is unreachable.
+- **Numeric version compare.** Naive string compare would have
+  treated `"1.0.10"` as older than `"1.0.9"`; the comparator now
+  splits on digit runs and compares numerically.
+
 ## v1.0.6 — 2026-05-11
 
 - **`mapper reset` no longer breaks the mapper.** Two bugs landed

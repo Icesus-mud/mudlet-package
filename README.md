@@ -7,19 +7,31 @@ row — without writing your own triggers.
 
 ## Install
 
-**Easy path — Mudlet GUI:**
+**One-liner — paste into Mudlet's command line:**
+
+```
+lua installPackage("https://github.com/Icesus-mud/mudlet-package/releases/latest/download/Icesus.mpackage")
+```
+
+Mudlet downloads the latest release and installs it in place. Connect
+to `icesus.org` (port `4443` TLS, or `4000` plain) and you're done.
+
+**GUI path** (same result, more clicks):
 
 1. Download
    [`Icesus.mpackage`](https://github.com/Icesus-mud/mudlet-package/releases/latest)
    from the latest release.
 2. In Mudlet: `Toolbox → Package Manager → Install`, point at the file.
-3. Connect to `icesus.org` (port `4443` TLS, or `4000` plain).
 
-**Direct from this repo:** clone and import `package/Icesus.xml` via
-Mudlet's Package Manager → Install. That imports the script directly
-without going through `.mpackage`.
+**Auto-updates.** Once installed, the package checks GitHub on each
+profile load and re-installs itself if a newer version is published.
+You'll see `Icesus update available: vX.Y.Z (you have vA.B.C).
+Installing…` in the main console — no action required, the new build
+slots in without a restart. To opt out, set
+`icesus.config.autoUpdate = false` in your own scripts before the
+package loads.
 
-The package emits a green `Icesus package v1.0.x ready.` line on load.
+The package emits a green `Icesus v1.0.x ready.` line on load.
 If you don't see vitals updating, the most likely cause is GMCP not
 being negotiated — make sure GMCP is enabled in your profile settings.
 
