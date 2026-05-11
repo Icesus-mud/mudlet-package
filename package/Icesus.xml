@@ -29,7 +29,7 @@ end</script>
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.7  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.8  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -41,7 +41,7 @@ end</script>
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.7"
+icesus.version = "1.0.8"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1504,6 +1504,25 @@ local function versionNewer(a, b)
   return false
 end
 
+-- Mudlet's default profile ships `generic_mapper` preinstalled. It
+-- builds the map from room-title + exits triggers, fighting our
+-- GMCP-driven mapper for the same Mudlet room IDs and producing a
+-- confused double graph. If it's present, drop it.
+function icesus.update.removeGenericMapper()
+  if not getPackages or not uninstallPackage then return end
+  local pkgs = getPackages()
+  if type(pkgs) ~= "table" then return end
+  for _, name in ipairs(pkgs) do
+    if name == "generic_mapper" then
+      pcall(uninstallPackage, "generic_mapper")
+      cecho("\n<yellow>Icesus<reset> removed Mudlet's bundled "
+        .. "<yellow>generic_mapper<reset> package "
+        .. "\226\128\148 it conflicts with the Icesus mapper.\n")
+      return
+    end
+  end
+end
+
 function icesus.update.check()
   if not downloadFile or not registerAnonymousEventHandler then return end
   if icesus.update.checking then return end
@@ -1718,6 +1737,13 @@ function icesus.install()
   cecho("\n<lime_green>Icesus<reset> v"
     .. icesus.version .. "<reset> ready. "
     .. "<grey>Deep, earned progression in a world that rewards commitment.<reset>\n")
+  -- Drop Mudlet's bundled generic_mapper if present — it competes
+  -- with us for Room.Info. Deferred by a second so the uninstall
+  -- doesn't run inside our own install stack and so Mudlet's
+  -- package-list is settled by the time we walk it.
+  if tempTimer then
+    tempTimer(1, function() pcall(icesus.update.removeGenericMapper) end)
+  end
   -- Background self-update check. Delayed 10s so the load banner is
   -- read first and any startup churn settles before we ask GitHub.
   if icesus.config.autoUpdate and tempTimer then

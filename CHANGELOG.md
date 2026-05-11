@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.8 — 2026-05-11
+
+- **Auto-removes `generic_mapper`.** Mudlet's default profile ships
+  the bundled `generic_mapper` package which hooks the same
+  `Room.Info` events we drive (via room-title triggers) and
+  competes for Mudlet mapper room IDs — producing a confused
+  double graph. On install we walk `getPackages()`, find it, and
+  call `uninstallPackage("generic_mapper")` (deferred via
+  `tempTimer(0)` so the uninstall doesn't run inside our own
+  install stack). A yellow banner tells the player what happened.
+  No-op if the package isn't present.
+
 ## v1.0.7 — 2026-05-11
 
 - **One-liner install.** README now leads with

@@ -23,6 +23,11 @@ to `icesus.org` (port `4443` TLS, or `4000` plain) and you're done.
    from the latest release.
 2. In Mudlet: `Toolbox → Package Manager → Install`, point at the file.
 
+**Conflicts handled automatically.** On first install, the package
+removes Mudlet's bundled `generic_mapper` if present — that script
+maps via title/exits heuristics and would fight the Icesus mapper
+for the same Mudlet room IDs.
+
 **Auto-updates.** Once installed, the package checks GitHub on each
 profile load and re-installs itself if a newer version is published.
 You'll see `Icesus update available: vX.Y.Z (you have vA.B.C).
