@@ -1,0 +1,100 @@
+[
+  { "delay_ms": 200, "package": "Char.Base", "payload": {
+      "name": "Idles", "title": "the cartographer",
+      "race": "Half-Elf", "guild": "Wizards" } },
+
+  { "delay_ms": 100, "package": "Room.Info", "payload": {
+      "name":  "Tavern Square",
+      "area":  "Vaerlon",
+      "id":    "a1a1a1a1",
+      "safe":  1,
+      "inn":   0,
+      "exits": {
+        "north": "b2b2b2b2",
+        "east":  "c3c3c3c3",
+        "south": "d4d4d4d4",
+        "enter shop": "e5e5e5e5"
+      }
+  } },
+
+  { "delay_ms": 700, "package": "Room.Info", "payload": {
+      "name":  "North Road",
+      "area":  "Vaerlon",
+      "id":    "b2b2b2b2",
+      "safe":  0,
+      "exits": {
+        "south": "a1a1a1a1",
+        "north": "f6f6f6f6"
+      }
+  } },
+
+  { "delay_ms": 700, "package": "Room.Info", "payload": {
+      "name":  "Vaerlon Outskirts",
+      "area":  "Vaerlon",
+      "id":    "f6f6f6f6",
+      "safe":  0,
+      "exits": {
+        "south": "b2b2b2b2",
+        "north": "11111111",
+        "west":  "0"
+      }
+  } },
+
+  { "delay_ms": 700, "package": "Room.Info", "payload": {
+      "name":  "Frozen Plain",
+      "area":  "Outworld",
+      "id":    "11111111",
+      "coords": [124, 87, 0],
+      "terrain": "road",
+      "safe":   0,
+      "exits": {
+        "south": "f6f6f6f6",
+        "north": "22222222",
+        "east":  "33333333"
+      },
+      "paths": { "north": "road", "east": "path" }
+  } },
+
+  { "delay_ms": 700, "package": "Room.Info", "payload": {
+      "name":  "Frozen Plain",
+      "area":  "Outworld",
+      "id":    "22222222",
+      "coords": [124, 86, 0],
+      "terrain": "road",
+      "exits": {
+        "south": "11111111",
+        "north": "44444444"
+      }
+  } },
+
+  { "delay_ms": 700, "package": "Room.Info", "payload": {
+      "name":  "A Void Rift",
+      "area":  "Unknown",
+      "id":    "",
+      "exits": {}
+  } },
+
+  { "delay_ms": 700, "package": "Room.Info", "payload": {
+      "name":  "Frozen Plain",
+      "area":  "Outworld",
+      "id":    "22222222",
+      "coords": [124, 86, 0],
+      "exits": {
+        "south": "11111111",
+        "north": "44444444"
+      }
+  } },
+
+  { "delay_ms": 700, "package": "Room.Info", "payload": {
+      "name":  "Tavern Square",
+      "area":  "Vaerlon",
+      "id":    "a1a1a1a1",
+      "safe":  1,
+      "exits": {
+        "north": "b2b2b2b2",
+        "east":  "c3c3c3c3",
+        "south": "d4d4d4d4",
+        "enter shop": "e5e5e5e5"
+      }
+  } }
+]

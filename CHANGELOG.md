@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.0.4 — 2026-05-11
+
+Drive Mudlet's built-in mapper from `gmcp.Room.Info` so `F11` shows a
+graph as the player walks. Closes the second checklist item on
+[Mudlet wiki: Listing your MUD](https://wiki.mudlet.org/w/Listing_Your_MUD)
+("Ensure that the Mudlet mapper works with your MUD"), pairing with the
+server-side `IAC GA` work for the first.
+
+- **`icesus.mapper` module.** New section inside `icesus.core` that
+  consumes the server-provided `id` (8-char hex of room file_name),
+  `exits` mapping (dir → 8-char hash, or 0 for shrouded), and
+  `coords` (outworld grid only) and translates them into
+  Mudlet's mapper API (`addRoom`, `setExit`, `setSpecialExit`,
+  `setRoomCoordinates`, `addAreaName`, `setRoomArea`).
+- **Room persistence.** Hex-id → Mudlet int-id mapping saved to
+  `<profile>/Icesus.idmap.lua`, the map data to
+  `<profile>/Icesus.map.dat`. Reload-on-start, debounced 30s
+  save, plus save on `sysExitEvent` (clean disconnect).
+- **Indoor layout.** Server only ships `coords` for outworld grid
+  tiles. Indoor rooms get topology layout: the very first room
+  anchors at (0,0,0), and each newly-seen neighbour is placed at
+  `parent_coords + DIR_OFFSET[dir]` so Mudlet draws a graph
+  instead of stacking everything at the origin.
+- **Mapper-hostile rooms skipped.** Server omits `id` for
+  `/void/...` and pre-nether rooms — those don't pollute the map.
+- **Shrouded exits.** `dest_hash == 0` renders as an exit stub
+  (direction visible, no link) so the player sees the option
+  without learning the destination they haven't walked yet.
+- **`mapper reset` alias.** New alias nukes `Icesus.map.dat`,
+  `Icesus.idmap.lua`, and calls `deleteMap()` so a corrupted map
+  can be cleared in-game without leaving Mudlet.
+- **Test fixture.** `tools/mudlet-dev/fixtures/mapper.json` walks
+  a synthetic newbie-school path through cardinal, special,
+  shrouded, outworld, and void rooms; with one back-step revisit
+  to confirm no node duplication.
+
 ## v1.0.3 — 2026-05-10
 
 Polish pass surfaced by the Greptile auto-review on the

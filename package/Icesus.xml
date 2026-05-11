@@ -3,7 +3,19 @@
 <MudletPackage version="1.001">
  <TriggerPackage></TriggerPackage>
  <TimerPackage></TimerPackage>
- <AliasPackage></AliasPackage>
+ <AliasPackage>
+  <Alias isActive="yes" isFolder="no">
+   <name>mapper reset</name>
+   <script>if icesus and icesus.mapper and icesus.mapper.reset then
+  icesus.mapper.reset()
+else
+  cecho("\n&lt;red&gt;mapper reset: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^mapper reset$</regex>
+  </Alias>
+ </AliasPackage>
  <ActionPackage></ActionPackage>
  <ScriptPackage>
   <ScriptGroup isActive="yes" isFolder="yes">
@@ -17,7 +29,7 @@
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.3  •  https://github.com/Icesus-mud/mudlet-package
+-- v1.0.4  •  https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -29,7 +41,7 @@
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.3"
+icesus.version = "1.0.4"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1159,6 +1171,286 @@ function icesus.onRoomInfo()
   s.exits = normaliseExits(r.exits)
   s.safe  = (r.safe == 1) or (r.safe == true)
   icesus.refreshRoom()
+  if icesus.mapper and icesus.mapper.onRoomInfo then
+    pcall(icesus.mapper.onRoomInfo, r)
+  end
+end
+
+-- =============================================================
+-- Mapper — drive Mudlet's built-in mapper from gmcp.Room.Info.
+--
+-- The server ships room.id (8-char hex), exits (dir -> 8-char hash
+-- of destination, or 0 for shrouded/dynamic), and optionally coords
+-- for outworld grid rooms. We translate that into Mudlet's integer
+-- roomID space and call addRoom / setExit / setSpecialExit /
+-- setRoomCoordinates so the F11 mapper view populates as the
+-- player walks. Mapper-hostile rooms (server omits id) are
+-- skipped — they stay invisible to the map.
+--
+-- State persistence: idToRoom (hex -> int) is saved to
+-- getMudletHomeDir().."/Icesus.idmap.lua" so room numbering is
+-- stable across reconnects. The map itself is saved via Mudlet's
+-- saveMap(path) — same lifecycle.
+-- =============================================================
+
+icesus.mapper = icesus.mapper or {}
+
+local CARDINALS = {
+  north=true, south=true, east=true, west=true,
+  northeast=true, northwest=true, southeast=true, southwest=true,
+  up=true, down=true, ["in"]=true, out=true,
+}
+
+-- Per-direction offsets in Mudlet's mapper coord system (+y = south).
+-- Used for indoor rooms where the server ships no coords — we lay them
+-- out relative to the room the player just left so the topology shows
+-- up on screen instead of every room piling on top of (0,0,0).
+local DIR_OFFSET = {
+  north     = { 0, -1, 0 }, south     = { 0,  1, 0 },
+  east      = { 1,  0, 0 }, west      = {-1,  0, 0 },
+  northeast = { 1, -1, 0 }, northwest = {-1, -1, 0 },
+  southeast = { 1,  1, 0 }, southwest = {-1,  1, 0 },
+  up        = { 0,  0, 1 }, down      = { 0,  0,-1 },
+  ["in"]    = { 0,  0, 0 }, out       = { 0,  0, 0 },
+}
+
+local function mapDataPath() return getMudletHomeDir() .. "/Icesus.map.dat" end
+local function idMapPath()  return getMudletHomeDir() .. "/Icesus.idmap.lua" end
+
+local function loadIdMap()
+  local t = {}
+  if io.exists and io.exists(idMapPath()) then
+    pcall(table.load, idMapPath(), t)
+  end
+  t.idToRoom = t.idToRoom or {}
+  t.areaToInt = t.areaToInt or {}
+  t.placed   = t.placed   or {}
+  -- next_id starts above any in-use Mudlet room. createRoomID()
+  -- gives us the next free int the engine knows about; we take
+  -- the max of that and our saved counter so a wiped idmap with
+  -- existing map data doesn't collide.
+  local engineNext = 1
+  if createRoomID then
+    local ok, v = pcall(createRoomID); if ok and type(v) == "number" then engineNext = v end
+  end
+  t.next_id = math.max(t.next_id or 1, engineNext)
+  return t
+end
+
+local function saveIdMap()
+  pcall(table.save, idMapPath(), icesus.mapper.idMap)
+end
+
+-- Resolve a server hex_id to a Mudlet integer roomID, creating the
+-- room with addRoom() the first time we see it. Pre-creating
+-- destination rooms before the player walks there lets Mudlet's
+-- auto-layout draw stubbed neighbours instead of empty space.
+local function ensureRoom(hexId)
+  local m = icesus.mapper.idMap
+  local roomId = m.idToRoom[hexId]
+  if roomId then return roomId end
+  local id = m.next_id
+  m.next_id = id + 1
+  local ok = addRoom and addRoom(id)
+  if ok == false then
+    -- collision (engine already used this int) — bump and retry
+    repeat
+      id = m.next_id
+      m.next_id = id + 1
+      ok = addRoom and addRoom(id)
+    until ok ~= false
+  end
+  m.idToRoom[hexId] = id
+  icesus.mapper.dirty = true
+  return id
+end
+
+local function ensureArea(name)
+  if not name or name == "" then return -1 end
+  local m = icesus.mapper.idMap
+  local areaId = m.areaToInt[name]
+  if areaId then return areaId end
+  local ok, v = pcall(addAreaName, name)
+  if ok and type(v) == "number" and v > 0 then
+    areaId = v
+    m.areaToInt[name] = areaId
+    icesus.mapper.dirty = true
+  end
+  return areaId or -1
+end
+
+-- Compare two ordered tables for equality (shallow, string keys).
+local function sameKeys(a, b)
+  if not a or not b then return a == b end
+  for k in pairs(a) do if b[k] == nil then return false end end
+  for k in pairs(b) do if a[k] == nil then return false end end
+  return true
+end
+
+function icesus.mapper.onRoomInfo(r)
+  if not addRoom or not setExit then return end       -- pre-mapper build
+  if type(r) ~= "table" then return end
+  local hexId = r.id
+  if type(hexId) ~= "string" or hexId == "" then return end
+  if not icesus.mapper.idMap then icesus.mapper.idMap = loadIdMap() end
+
+  local roomId = ensureRoom(hexId)
+
+  -- Room name + area. Update unconditionally: rare renames + area
+  -- changes both need to propagate.
+  if r.name then pcall(setRoomName, roomId, tostring(r.name)) end
+  if r.area and r.area ~= "" then
+    local areaId = ensureArea(tostring(r.area))
+    if areaId and areaId > 0 then pcall(setRoomArea, roomId, areaId) end
+  end
+
+  -- Coords. Outworld grid rooms get absolute server coords (server's
+  -- y grows southward, matching Mudlet's +y convention). Indoor rooms
+  -- ship no coords — we anchor the very first room at (0,0,0) and
+  -- spread the rest by direction offsets when their exits are
+  -- processed below.
+  local m = icesus.mapper.idMap
+  if type(r.coords) == "table" and #r.coords >= 2 then
+    local x = tonumber(r.coords[1])
+    local y = tonumber(r.coords[2])
+    local z = tonumber(r.coords[3] or 0) or 0
+    if x and y then
+      pcall(setRoomCoordinates, roomId, x, y, z)
+      m.placed[hexId] = { x, y, z }
+    end
+  end
+  if not m.placed[hexId] then
+    -- First indoor room ever seen this session — anchor at the origin.
+    pcall(setRoomCoordinates, roomId, 0, 0, 0)
+    m.placed[hexId] = { 0, 0, 0 }
+  end
+
+  -- Exits. The server sends a mapping dir -> dest_hash. dest_hash
+  -- of 0 means shrouded / unknown destination (still plot the
+  -- direction stub so the player sees the option). Cardinal exits
+  -- go through setExit, anything else (e.g. "enter shop") through
+  -- setSpecialExit.
+  local exits = r.exits
+  if type(exits) == "table" then
+    -- Track what's still live so we can prune disappeared exits.
+    local liveCardinals = {}
+    local liveSpecials  = {}
+    for dir, dest in pairs(exits) do
+      if type(dir) == "string" and dir ~= "" then
+        local destHash
+        if type(dest) == "string" and dest ~= "" and dest ~= "0" then
+          destHash = dest
+        end
+        if CARDINALS[dir] then
+          liveCardinals[dir] = true
+          if destHash then
+            local destId = ensureRoom(destHash)
+            pcall(setExit, roomId, destId, dir)
+            -- Position unplaced destinations relative to this room so
+            -- Mudlet draws a graph instead of stacking everything at
+            -- the origin. Once a room has coords (here or via server
+            -- r.coords), they stay sticky — we don't reshuffle.
+            if not m.placed[destHash] and m.placed[hexId] and DIR_OFFSET[dir] then
+              local p = m.placed[hexId]
+              local o = DIR_OFFSET[dir]
+              local dx, dy, dz = p[1] + o[1], p[2] + o[2], p[3] + o[3]
+              pcall(setRoomCoordinates, destId, dx, dy, dz)
+              m.placed[destHash] = { dx, dy, dz }
+            end
+          elseif setExitStub then
+            -- Cardinal exit with unknown destination — stub so the
+            -- direction renders, but don't draw a line.
+            pcall(setExit, roomId, -1, dir)        -- clear any prior link
+            pcall(setExitStub, roomId, dir, true)
+          end
+        else
+          liveSpecials[dir] = true
+          if destHash then
+            local destId = ensureRoom(destHash)
+            pcall(setSpecialExit, roomId, destId, dir)
+          end
+          -- Special exits with unknown destinations can't be
+          -- represented in Mudlet without a real target — skip.
+        end
+      end
+    end
+    -- Prune cardinal exits that are no longer present.
+    if getRoomExits then
+      local ok, existing = pcall(getRoomExits, roomId)
+      if ok and type(existing) == "table" then
+        for dir in pairs(existing) do
+          if not liveCardinals[dir] then
+            pcall(setExit, roomId, -1, dir)
+          end
+        end
+      end
+    end
+    -- Prune special exits we placed earlier that are now gone.
+    if clearSpecialExits and getSpecialExits then
+      local ok, existing = pcall(getSpecialExits, roomId)
+      if ok and type(existing) == "table" then
+        local needRebuild = false
+        for cmd in pairs(existing) do
+          if not liveSpecials[cmd] then needRebuild = true; break end
+        end
+        if needRebuild then
+          pcall(clearSpecialExits, roomId)
+          for cmd in pairs(liveSpecials) do
+            local destHash = exits[cmd]
+            if destHash and destHash ~= "0" then
+              pcall(setSpecialExit, roomId, ensureRoom(destHash), cmd)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if centerview then pcall(centerview, roomId) end
+  icesus.mapper.dirty = true
+end
+
+function icesus.mapper.flushSave()
+  if not icesus.mapper.dirty then return end
+  if saveMap then pcall(saveMap, mapDataPath()) end
+  saveIdMap()
+  icesus.mapper.dirty = false
+end
+
+function icesus.mapper.reset()
+  if deleteMap then pcall(deleteMap) end
+  if os.remove then pcall(os.remove, mapDataPath()) end
+  if os.remove then pcall(os.remove, idMapPath()) end
+  icesus.mapper.idMap = { idToRoom = {}, areaToInt = {}, next_id = 1 }
+  icesus.mapper.dirty = false
+  cecho("\n<lime_green>Icesus<reset> mapper reset \226\128\148 the next room you enter will start a fresh map.\n")
+end
+
+function icesus.mapper.install()
+  -- Restore persisted state up front so the player's existing map
+  -- shows in F11 even before any Room.Info arrives this session.
+  if not icesus.mapper.idMap then
+    icesus.mapper.idMap = loadIdMap()
+    if loadMap then pcall(loadMap, mapDataPath()) end
+  end
+  -- Periodic flush so a crash loses at most ~30s of walking.
+  if icesus.mapper.saveTimer then
+    pcall(killTimer, icesus.mapper.saveTimer)
+  end
+  if tempTimer then
+    icesus.mapper.saveTimer = tempTimer(30, function()
+      icesus.mapper.flushSave()
+      icesus.mapper.install()                     -- re-arm one-shot timer
+    end)
+  end
+end
+
+function icesus.mapper.teardown()
+  if icesus.mapper.saveTimer then
+    pcall(killTimer, icesus.mapper.saveTimer)
+    icesus.mapper.saveTimer = nil
+  end
+  icesus.mapper.flushSave()
 end
 
 function icesus.onCooldowns()
@@ -1329,6 +1621,7 @@ function icesus.install()
   reg("gmcp.Comm.Channel.Text",    icesus.onCommText)
   reg("sysConnectionEvent",   icesus.subscribeGMCP)
   reg("sysExitEvent",         icesus.uninstall)
+  if icesus.mapper and icesus.mapper.install then icesus.mapper.install() end
   if isConnected and isConnected() then icesus.subscribeGMCP() end
   cecho("\n<lime_green>Icesus<reset> v"
     .. icesus.version .. "<reset> ready. "
@@ -1342,6 +1635,7 @@ function icesus.uninstall()
     end
     icesus.handlers = {}
   end
+  if icesus.mapper and icesus.mapper.teardown then icesus.mapper.teardown() end
   icesus.teardownHUD()
 end
 
