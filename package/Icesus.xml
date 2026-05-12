@@ -41,7 +41,11 @@ end</script>
 -- icesus.palette below; gauge gradients use Qt's qlineargradient.
 
 icesus = icesus or {}
-icesus.version = "1.0.8"
+-- Single-source version from the .mpackage's config.lua via Mudlet's
+-- package info; fall back to the literal for dev hot-reload from disk
+-- (when this file isn't loaded as an installed package yet).
+icesus.version = (getPackageInfo and getPackageInfo("Icesus")
+                  and getPackageInfo("Icesus").version) or "1.0.9"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1550,15 +1554,33 @@ function icesus.update.check()
       cecho(string.format(
         "\n<yellow>Icesus<reset> update available: <lime_green>v%s<reset> "
         .. "(you have v%s). Installing\226\128\166\n", latest, icesus.version))
-      -- Defer the re-install so this callback's stack isn't killed
-      -- mid-execution by the package's own uninstall path.
-      tempTimer(0, function() pcall(installPackage, RELEASE_URL) end)
+      -- installPackage() errors if "Icesus" is already installed and
+      -- Mudlet has no atomic reinstall API, so uninstall first then
+      -- reinstall. Anonymous tempTimers and event handlers survive the
+      -- package teardown (they live in Mudlet's runtime pool, not in
+      -- the package XML). Trigger install on sysUninstallPackage, with
+      -- 5s and 10s tempTimer retries as belt-and-braces against
+      -- Mudlet issue #719 (uninstallPackage can hang).
+      local installed = false
+      local function doInstall()
+        if installed then return end
+        installed = true
+        pcall(installPackage, RELEASE_URL)
+      end
+      registerAnonymousEventHandler("sysUninstallPackage", function(_, pkg)
+        if pkg == "Icesus" then doInstall() end
+      end, true)
+      tempTimer(5,  doInstall)
+      tempTimer(10, doInstall)
+      pcall(uninstallPackage, "Icesus")
     end
   end)
 
   errHandler = registerAnonymousEventHandler("sysDownloadError", function(_, _, file)
     if file ~= cache then return end
     cleanup()
+    cecho("\n<yellow>Icesus<reset> couldn't reach GitHub to check "
+      .. "for updates. Will retry next session.\n")
   end)
 
   pcall(downloadFile, cache, VERSION_URL)
