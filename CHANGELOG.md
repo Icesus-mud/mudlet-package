@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.11 — 2026-05-24
+
+- **Hot-upgrade crash fix.** v1.0.10 introduced `idMap.areaCoords`
+  and `idMap.gridmoded`, but my install path only ran `loadIdMap`
+  (which defaults the new fields) when `icesus.mapper.idMap` was
+  nil. On a hot upgrade from v1.0.7–v1.0.10 the in-memory `idMap`
+  survives without the new fields, and the first `Room.Info` after
+  upgrade tripped `attempt to index field 'areaCoords' (a nil
+  value)`. `markCoord`, `freeCoord`, and the gridmode check now
+  lazily initialise the new fields, so an upgraded session
+  self-heals on the next room movement.
+
 ## v1.0.10 — 2026-05-24
 
 - **New-player login is quiet.** On a fresh Mudlet install where the

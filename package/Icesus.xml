@@ -45,7 +45,7 @@ icesus = icesus or {}
 -- package info; fall back to the literal for dev hot-reload from disk
 -- (when this file isn't loaded as an installed package yet).
 icesus.version = (getPackageInfo and getPackageInfo("Icesus")
-                  and getPackageInfo("Icesus").version) or "1.0.10"
+                  and getPackageInfo("Icesus").version) or "1.0.11"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1294,6 +1294,11 @@ end
 local function markCoord(areaId, x, y, z)
   if not areaId or areaId <= 0 then return end
   local m = icesus.mapper.idMap
+  -- areaCoords + gridmoded were introduced in v1.0.10. On a hot
+  -- upgrade from an older build, icesus.mapper.idMap survives in
+  -- memory without these fields — initialise lazily here so we
+  -- don't index nil.
+  m.areaCoords = m.areaCoords or {}
   m.areaCoords[areaId] = m.areaCoords[areaId] or {}
   m.areaCoords[areaId][x .. "," .. y .. "," .. z] = true
 end
@@ -1304,6 +1309,7 @@ end
 -- tiles instead of piling them all at (0,0,0).
 local function freeCoord(areaId, baseX, baseY, baseZ)
   local m = icesus.mapper.idMap
+  m.areaCoords = m.areaCoords or {}                -- see markCoord note
   m.areaCoords[areaId] = m.areaCoords[areaId] or {}
   local used = m.areaCoords[areaId]
   local function key(x, y, z) return x .. "," .. y .. "," .. z end
@@ -1418,6 +1424,7 @@ function icesus.mapper.onRoomInfo(r)
       -- r.coords is the server's signal that this tile is outworld.
       -- Flip the area to gridmode the first time we see it — the
       -- map reads as a pixel map instead of node-and-line graph.
+      m.gridmoded = m.gridmoded or {}                -- hot-upgrade safety
       if areaId > 0 and not m.gridmoded[areaId] and setGridMode then
         m.gridmoded[areaId] = true
         pcall(setGridMode, areaId, true)
