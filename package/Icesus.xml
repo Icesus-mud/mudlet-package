@@ -1248,6 +1248,24 @@ local DIR_OFFSET = {
   ["in"]    = { 0,  0, 0 }, out       = { 0,  0, 0 },
 }
 
+-- Terrain glyph + env mapping. The server ships r.terrain only for
+-- outworld tiles where the underlying char is one of road / path
+-- (see gmcp_d.c::send_room_info). We render those with a single
+-- ASCII char in the room cell and tint the cell via a custom env
+-- id. Indoor rooms ship no terrain and keep Mudlet's default env.
+local TERRAIN_CHAR = { road = "#", path = "." }
+
+-- Env ids above 16 are safe — Mudlet's built-ins occupy 1-16. The
+-- RGB values are registered once at mapper.install() via
+-- setCustomEnvColor and then referenced by id from setRoomEnv.
+local TERRAIN_ENV  = { road = 200, path = 201 }
+
+local function setupTerrainEnvs()
+  if not setCustomEnvColor then return end
+  pcall(setCustomEnvColor, TERRAIN_ENV.road, 139,  90,  43, 255) -- saddle brown
+  pcall(setCustomEnvColor, TERRAIN_ENV.path, 222, 184, 135, 255) -- burlywood
+end
+
 local function mapDataPath() return getMudletHomeDir() .. "/Icesus.map.dat" end
 local function idMapPath()  return getMudletHomeDir() .. "/Icesus.idmap.lua" end
 
@@ -1259,6 +1277,8 @@ local function loadIdMap()
   t.idToRoom = t.idToRoom or {}
   t.areaToInt = t.areaToInt or {}
   t.placed   = t.placed   or {}
+  t.gridmoded = t.gridmoded or {}     -- areaId -> true once gridmode is on
+  t.areaCoords = t.areaCoords or {}   -- areaId -> { "x,y,z" -> true } occupancy
   -- next_id starts above any in-use Mudlet room. createRoomID()
   -- gives us the next free int the engine knows about; we take
   -- the max of that and our saved counter so a wiped idmap with
@@ -1269,6 +1289,46 @@ local function loadIdMap()
   end
   t.next_id = math.max(t.next_id or 1, engineNext)
   return t
+end
+
+local function markCoord(areaId, x, y, z)
+  if not areaId or areaId <= 0 then return end
+  local m = icesus.mapper.idMap
+  m.areaCoords[areaId] = m.areaCoords[areaId] or {}
+  m.areaCoords[areaId][x .. "," .. y .. "," .. z] = true
+end
+
+-- Find an unused (x, y, z) in this area, starting at the requested
+-- coordinate and spiralling outward on the z-plane. Used to scatter
+-- indoor buildings (Shanty Town, inn cellars, …) near their entrance
+-- tiles instead of piling them all at (0,0,0).
+local function freeCoord(areaId, baseX, baseY, baseZ)
+  local m = icesus.mapper.idMap
+  m.areaCoords[areaId] = m.areaCoords[areaId] or {}
+  local used = m.areaCoords[areaId]
+  local function key(x, y, z) return x .. "," .. y .. "," .. z end
+  if not used[key(baseX, baseY, baseZ)] then
+    used[key(baseX, baseY, baseZ)] = true
+    return baseX, baseY, baseZ
+  end
+  for radius = 1, 50 do
+    for dx = -radius, radius do
+      for dy = -radius, radius do
+        if math.abs(dx) == radius or math.abs(dy) == radius then
+          local x, y = baseX + dx, baseY + dy
+          local k = key(x, y, baseZ)
+          if not used[k] then
+            used[k] = true
+            return x, y, baseZ
+          end
+        end
+      end
+    end
+  end
+  -- 50-radius search is enough for any sane area; if we get here the
+  -- area is genuinely packed and a collision is better than infinite
+  -- looping.
+  return baseX, baseY, baseZ
 end
 
 local function saveIdMap()
@@ -1333,17 +1393,19 @@ function icesus.mapper.onRoomInfo(r)
   -- Room name + area. Update unconditionally: rare renames + area
   -- changes both need to propagate.
   if r.name then pcall(setRoomName, roomId, tostring(r.name)) end
+  local areaId = -1
   if r.area and r.area ~= "" then
-    local areaId = ensureArea(tostring(r.area))
+    areaId = ensureArea(tostring(r.area))
     if areaId and areaId > 0 then pcall(setRoomArea, roomId, areaId) end
   end
 
   -- Coords. Outworld grid rooms get absolute server coords with Y
   -- flipped: the server's y grows southward (top-down array index),
   -- Mudlet's grows northward (geographic convention). Indoor rooms
-  -- ship no coords — we anchor the very first room at (0,0,0) and
-  -- spread the rest by direction offsets when their exits are
-  -- processed below.
+  -- ship no coords — we anchor each new building near the room the
+  -- player just stepped out of (lastHexId) and let freeCoord pick a
+  -- collision-free spot so multiple buildings in the same area
+  -- don't pile up at the origin.
   local m = icesus.mapper.idMap
   if type(r.coords) == "table" and #r.coords >= 2 then
     local x = tonumber(r.coords[1])
@@ -1352,12 +1414,40 @@ function icesus.mapper.onRoomInfo(r)
     if x and y then
       pcall(setRoomCoordinates, roomId, x, -y, z)
       m.placed[hexId] = { x, -y, z }
+      markCoord(areaId, x, -y, z)
+      -- r.coords is the server's signal that this tile is outworld.
+      -- Flip the area to gridmode the first time we see it — the
+      -- map reads as a pixel map instead of node-and-line graph.
+      if areaId > 0 and not m.gridmoded[areaId] and setGridMode then
+        m.gridmoded[areaId] = true
+        pcall(setGridMode, areaId, true)
+        icesus.mapper.dirty = true
+      end
     end
   end
   if not m.placed[hexId] then
-    -- First indoor room ever seen this session — anchor at the origin.
-    pcall(setRoomCoordinates, roomId, 0, 0, 0)
-    m.placed[hexId] = { 0, 0, 0 }
+    -- Anchor unplaced indoor rooms near the last room we saw
+    -- (typically where the player just walked from), then scan
+    -- outward for a free slot per-area.
+    local baseX, baseY, baseZ = 0, 0, 0
+    local last = icesus.mapper.lastHexId
+    if last and m.placed[last] then
+      local p = m.placed[last]
+      baseX, baseY, baseZ = p[1], p[2], p[3]
+    end
+    local fx, fy, fz = freeCoord(areaId, baseX, baseY, baseZ)
+    pcall(setRoomCoordinates, roomId, fx, fy, fz)
+    m.placed[hexId] = { fx, fy, fz }
+  end
+
+  -- Terrain glyph + env tint. Server only ships r.terrain for
+  -- outworld tiles with a road or path underneath; everything else
+  -- keeps Mudlet's default rendering.
+  if type(r.terrain) == "string" then
+    local tc = TERRAIN_CHAR[r.terrain]
+    if tc and setRoomChar then pcall(setRoomChar, roomId, tc) end
+    local te = TERRAIN_ENV[r.terrain]
+    if te and setRoomEnv  then pcall(setRoomEnv,  roomId, te) end
   end
 
   -- Exits. The server sends a mapping dir -> dest_hash. dest_hash
@@ -1391,6 +1481,9 @@ function icesus.mapper.onRoomInfo(r)
               local dx, dy, dz = p[1] + o[1], p[2] + o[2], p[3] + o[3]
               pcall(setRoomCoordinates, destId, dx, dy, dz)
               m.placed[destHash] = { dx, dy, dz }
+              -- Same-area cardinal neighbour — register the slot so
+              -- freeCoord (for future buildings) knows it's taken.
+              markCoord(areaId, dx, dy, dz)
             end
           elseif setExitStub then
             -- Cardinal exit with unknown destination — stub so the
@@ -1442,6 +1535,7 @@ function icesus.mapper.onRoomInfo(r)
   end
 
   if centerview then pcall(centerview, roomId) end
+  icesus.mapper.lastHexId = hexId       -- anchor next indoor room here
   icesus.mapper.dirty = true
 end
 
@@ -1464,7 +1558,11 @@ function icesus.mapper.reset()
   end
   if os.remove then pcall(os.remove, mapDataPath()) end
   if os.remove then pcall(os.remove, idMapPath()) end
-  icesus.mapper.idMap = { idToRoom = {}, areaToInt = {}, placed = {}, next_id = 1 }
+  icesus.mapper.idMap = {
+    idToRoom = {}, areaToInt = {}, placed = {},
+    gridmoded = {}, areaCoords = {}, next_id = 1,
+  }
+  icesus.mapper.lastHexId = nil
   icesus.mapper.dirty = false
   if updateMap then pcall(updateMap) end
   cecho("\n<lime_green>Icesus<reset> mapper reset \226\128\148 the next room you enter will start a fresh map.\n")
@@ -1483,6 +1581,7 @@ function icesus.mapper.install()
       pcall(loadMap, mapDataPath())
     end
   end
+  setupTerrainEnvs()
   -- Periodic flush so a crash loses at most ~30s of walking.
   if icesus.mapper.saveTimer then
     pcall(killTimer, icesus.mapper.saveTimer)
