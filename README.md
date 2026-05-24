@@ -98,12 +98,20 @@ What's plumbed in:
   `enter shop` become special exits. Shrouded or dynamic
   destinations render as direction stubs — you see the option without
   learning the target.
-- **Indoor layout.** Server only ships absolute coordinates for the
-  outworld grid. Indoor rooms anchor at `(0,0,0)` from your starting
-  location and lay out by direction offsets as you walk, so the graph
-  reads naturally instead of stacking at the origin.
 - **Outworld.** Server ships absolute `(x, y)` for grid tiles; placed
-  with Mudlet's geographic convention (north is up).
+  with Mudlet's geographic convention (north is up). The first
+  coord-bearing tile in an area auto-flips it to `setGridMode` so the
+  overworld renders as a pixel map.
+- **Terrain glyphs.** Road tiles paint `#` in saddle brown, path
+  tiles paint `.` in burlywood (`setRoomChar` + `setRoomEnv` from
+  `Room.Info.terrain`). The grid view ends up reading like a tiny
+  ASCII overworld.
+- **Indoor layout.** Server doesn't ship coords for indoor rooms.
+  The package anchors each unplaced room near the last room you
+  visited and scans outward for a free slot per-area, so buildings
+  entered via `enter shop` / `enter house` scatter near their
+  entrances instead of all piling up at `(0,0,0)`. Walking inside a
+  building expands cardinally as normal.
 - **Mapper-hostile rooms** (the `/void/` rifts, pre-nether) are
   silently skipped — those rooms don't pollute the map.
 - **Persistence.** The map saves every 30 seconds and on clean

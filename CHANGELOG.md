@@ -1,5 +1,59 @@
 # Changelog
 
+## v1.0.10 — 2026-05-24
+
+- **New-player login is quiet.** On a fresh Mudlet install where the
+  bundled `generic_mapper` is present, the mapper widget's
+  `mapOpenEvent` fires while the player is still at the new-character
+  name prompt — and `generic_mapper`'s handler responds with
+  `send("look")`, naming the character "look". v1.0.8 already
+  uninstalled `generic_mapper`, but via `tempTimer(1, …)` which lost
+  the race. Uninstall now runs synchronously at the top of
+  `icesus.install()`, before any handler can fire.
+- **All package output deferred to first `Char.Base`.** Character
+  creation sees no banners, no `Icesus removed generic_mapper`
+  notice, and no mapper-side bookkeeping. The `Icesus vX.Y.Z ready.`
+  line lands the moment the character is logged in.
+- **Fresh-profile mapper noise gone.** `loadMap` is now guarded by
+  `io.exists` — Mudlet's "Unable to open map file for reading" +
+  debug dump no longer fires on a profile with no saved map yet.
+  (Mudlet emits that from C++; `pcall` couldn't suppress it.)
+- **Overworld auto-gridmode.** First `Room.Info` with `r.coords` in
+  an area flips it to `setGridMode(areaId, true)` — the outworld
+  reads as a pixel map instead of node-and-line. Detection is
+  data-driven (server only ships coords for outworld), no hardcoded
+  area id, persisted via `idMap.gridmoded` across reconnects.
+- **Terrain glyphs.** `r.terrain == "road"` paints `#` in saddle
+  brown; `r.terrain == "path"` paints `.` in burlywood, via
+  `setRoomChar` + `setRoomEnv`. Custom envs registered once at
+  mapper boot.
+- **Indoor stacking fix.** Buildings entered via special exits used
+  to all anchor at `(0,0,0)` — Shanty Town shops piled into a
+  jumble at the origin. Unplaced rooms now anchor at the last
+  placed room (where the player just walked from) and `freeCoord`
+  spirals outward to find a free slot per-area; every placement is
+  registered into `idMap.areaCoords` so future buildings respect
+  it.
+
+## v1.0.9 — 2026-05-12
+
+- **Auto-updater no longer trips on its own reinstall.**
+  `installPackage()` was being called without first removing the
+  installed Icesus, producing Mudlet's `Package Icesus is already
+  installed` error and stalling the update. Now uninstalls first
+  via a `sysUninstallPackage` event hook plus 5s/10s `tempTimer`
+  retries as belt-and-braces against Mudlet issue #719
+  (`uninstallPackage` can hang). Anonymous timers + event handlers
+  survive the teardown — they live in Mudlet's runtime pool, not
+  the package XML.
+- **Single-source version.** `icesus.version` reads from
+  `getPackageInfo("Icesus").version` so the literal in `Icesus.xml`
+  can't drift from `package/config.lua`. Literal kept as a fallback
+  for dev hot-reload from disk.
+- **Visible error feedback.** `sysDownloadError` now echoes a
+  `couldn't reach GitHub` notice instead of swallowing the failure
+  silently after the `Installing…` line.
+
 ## v1.0.8 — 2026-05-11
 
 - **Auto-removes `generic_mapper`.** Mudlet's default profile ships
