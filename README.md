@@ -47,7 +47,8 @@ being negotiated — make sure GMCP is enabled in your profile settings.
 - **Carry summary** — money, divine favor, carry weight % from
   `Char.Status`.
 - **EXP gauge** — full-width forest-green bar with current EXP and
-  percent-to-next.
+  percent-to-next. At level 100 (cap), it switches to tracking
+  progress toward your next advancement point.
 
 **Bottom strip** (below the main console, above the command line)
 - **Vitals** — HP / SP / EP gauges, plus PSP if your character has any.

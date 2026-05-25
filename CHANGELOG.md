@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.12 — 2026-05-25
+
+- **EXP gauge switches to advancement-point progress at level cap.**
+  Once `Char.Status.level` hits 100, the package reads `s.tna` (cost
+  of the next advancement point) instead of `s.tnl` (cost of the
+  next level, which is frozen at the level-100 sentinel and stops
+  being meaningful). The gauge relabels to `AP  X / Y  P% to next
+  point` and tracks usable experience toward your next adv point.
+  Below cap, behavior is unchanged.
+
 ## v1.0.11 — 2026-05-24
 
 - **Hot-upgrade crash fix.** v1.0.10 introduced `idMap.areaCoords`

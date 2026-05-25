@@ -45,7 +45,7 @@ icesus = icesus or {}
 -- package info; fall back to the literal for dev hot-reload from disk
 -- (when this file isn't loaded as an installed package yet).
 icesus.version = (getPackageInfo and getPackageInfo("Icesus")
-                  and getPackageInfo("Icesus").version) or "1.0.11"
+                  and getPackageInfo("Icesus").version) or "1.0.12"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -133,7 +133,7 @@ icesus.state = {
   vitals          = { hp=0, hpmax=0, sp=0, spmax=0, ep=0, epmax=0,
                       psp=0, pspmax=0 },
   identity        = { name="", title="", race="", guild="", level=0 },
-  exp             = { exp=0, tnl=0 },
+  exp             = { exp=0, tnl=0, tna=0 },
   carry           = { money=0, bank=0, dfavor=0,
                       wt=0, wtmax=0, vol=0, volmax=0 },
   enemies         = {},
@@ -714,15 +714,20 @@ end
 function icesus.refreshExp()
   if not icesus.hud or not icesus.hud.expGauge then return end
   local e = icesus.state.exp
-  local total = math.max(e.tnl or 0, 1)
+  local level = icesus.state.identity.level or 0
+  local atCap = level >= 100
+  local denom = atCap and (e.tna or 0) or (e.tnl or 0)
+  local label = atCap and "AP" or "EXP"
+  local suffix = atCap and "to next point" or "to next"
+  local total = math.max(denom, 1)
   local cur   = math.max(e.exp or 0, 0)
-  if cur > total then cur = total end
-  local pct   = (e.tnl and e.tnl > 0) and string.format("%.1f%%", cur * 100 / total) or "—"
-  if e.tnl and e.tnl > 0 then
-    icesus.hud.expGauge:setValue(cur, total, string.format(
-      "EXP  %s / %s   %s to next", shortAmount(cur), shortAmount(total), pct))
+  local shown = math.min(cur, total)
+  local pct   = (denom > 0) and string.format("%.1f%%", cur * 100 / denom) or "—"
+  if denom > 0 then
+    icesus.hud.expGauge:setValue(shown, total, string.format(
+      "%s  %s / %s   %s %s", label, shortAmount(cur), shortAmount(denom), pct, suffix))
   else
-    icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
+    icesus.hud.expGauge:setValue(0, 1, label .. " — / —")
   end
 end
 
@@ -1026,10 +1031,11 @@ function icesus.onStatus()
     icesus.refreshIdentity()
   end
 
-  -- exp / tnl
-  if s.exp ~= nil or s.tnl ~= nil then
+  -- exp / tnl / tna
+  if s.exp ~= nil or s.tnl ~= nil or s.tna ~= nil then
     icesus.state.exp.exp = tonumber(s.exp) or icesus.state.exp.exp
     icesus.state.exp.tnl = tonumber(s.tnl) or icesus.state.exp.tnl
+    icesus.state.exp.tna = tonumber(s.tna) or icesus.state.exp.tna
     icesus.refreshExp()
   end
 
