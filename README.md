@@ -132,6 +132,44 @@ That wipes the saved map and ID table; the next room you enter starts
 a fresh graph. The reset is per-profile, so different characters keep
 their own maps.
 
+## Resetting and reinstalling
+
+If the HUD looks frozen after a link-death or a long stretch of bad
+connection — gauges blank, channels silent, momentum buttons stuck —
+you can reinitialize the package without restarting Mudlet. Paste
+into the command line:
+
+```
+lua icesus.install()
+```
+
+`install()` is idempotent: it tears down every event handler, mapper
+hook, and HUD widget the package owns, then builds them fresh and
+re-subscribes to GMCP. The next packet from the server repopulates
+the displays. Safe to run any time; the map and saved settings are
+left alone.
+
+For map-specific corruption (rooms upside-down, exits pointing
+nowhere), use [`mapper reset`](#mapper) instead — it wipes only the
+map state.
+
+### Manual uninstall and reinstall
+
+If a reinit doesn't clear it, or you want a completely clean slate:
+
+1. Open `Toolbox → Package Manager` in Mudlet.
+2. Select `Icesus` in the list and click `Uninstall`.
+3. Reinstall with the one-liner from the top of this README:
+   ```
+   lua installPackage("https://github.com/Icesus-mud/mudlet-package/releases/latest/download/Icesus.mpackage")
+   ```
+
+Uninstall removes the package's scripts, triggers, and aliases but
+leaves your saved map (`<profile>/Icesus.map.dat`) and room-ID table
+(`<profile>/Icesus.idmap.lua`) in place, so reinstall picks up where
+you left off. To start the mapper from zero too, delete those two
+files from your Mudlet profile directory before reinstalling.
+
 ## Building
 
 ```sh
