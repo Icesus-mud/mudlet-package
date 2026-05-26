@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.0.13 — 2026-05-26
+
+- **Outworld terrain palette.** Server now ships categorical
+  terrain names (water, swamp, mountain, plains, forest, ice) on
+  `Room.Info` for all outworld tiles, not just road/path. Package
+  paints each tile with the pinkfish "classic" 16-color RGB
+  (BLUE water, RED swamp, GREEN forest, HI_BLACK mountain,
+  HI_YELLOW plains, HI_CYAN ice) and a single distinctive glyph
+  on water/swamp/mountain. Forest/plains/ice rely on env color
+  for identity. Road and path keep their glyph and shift to
+  pinkfish YELLOW + WHITE for palette consistency.
+- **Mapper auto-recovers from a wiped map.** When `Icesus.idmap.lua`
+  references room IDs that Mudlet no longer knows about (e.g. the
+  player deleted the map via Mudlet's UI), `mapper.install()` now
+  detects the mismatch by sampling room names and self-resets so
+  the next room walked starts a fresh map. Previously the package
+  thought every room was "already placed" and refused to redraw
+  until the player ran `mapper reset` manually (reported by Uno,
+  issue #472).
+
 ## v1.0.12 — 2026-05-25
 
 - **EXP gauge switches to advancement-point progress at level cap.**

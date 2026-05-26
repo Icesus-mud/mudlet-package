@@ -45,7 +45,7 @@ icesus = icesus or {}
 -- package info; fall back to the literal for dev hot-reload from disk
 -- (when this file isn't loaded as an installed package yet).
 icesus.version = (getPackageInfo and getPackageInfo("Icesus")
-                  and getPackageInfo("Icesus").version) or "1.0.12"
+                  and getPackageInfo("Icesus").version) or "1.0.13"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1254,22 +1254,46 @@ local DIR_OFFSET = {
   ["in"]    = { 0,  0, 0 }, out       = { 0,  0, 0 },
 }
 
--- Terrain glyph + env mapping. The server ships r.terrain only for
--- outworld tiles where the underlying char is one of road / path
--- (see gmcp_d.c::send_room_info). We render those with a single
--- ASCII char in the room cell and tint the cell via a custom env
--- id. Indoor rooms ship no terrain and keep Mudlet's default env.
-local TERRAIN_CHAR = { road = "#", path = "." }
+-- Terrain glyph + env mapping. Server ships r.terrain for outworld
+-- tiles as categorical names (see gmcp_d.c::send_room_info: road,
+-- path, water, swamp, mountain, plains, forest, ice). We render
+-- a glyph in the room cell for distinctive features only (water,
+-- swamp, mountain) and let env color carry the identity for the
+-- broader fills (forest, plains, ice). Indoor rooms ship no
+-- terrain and keep Mudlet's default env.
+local TERRAIN_CHAR = {
+  road     = "#",
+  path     = ".",
+  water    = "~",
+  swamp    = "s",
+  mountain = "^",
+}
 
--- Env ids above 16 are safe — Mudlet's built-ins occupy 1-16. The
--- RGB values are registered once at mapper.install() via
--- setCustomEnvColor and then referenced by id from setRoomEnv.
-local TERRAIN_ENV  = { road = 200, path = 201 }
+-- Env ids above 16 are safe — Mudlet's built-ins occupy 1-16. RGBs
+-- mirror the pinkfish "classic" 16-color palette (the pre-2026-04
+-- terminal look, see /adm/daemons/outworld_palette_d.c). Registered
+-- once at mapper.install() via setCustomEnvColor.
+local TERRAIN_ENV  = {
+  road     = 200,  -- YELLOW   (brown)
+  path     = 201,  -- WHITE    (worn track)
+  water    = 202,  -- BLUE
+  swamp    = 203,  -- RED
+  mountain = 204,  -- HI_BLACK (gray)
+  plains   = 205,  -- HI_YELLOW
+  forest   = 206,  -- GREEN
+  ice      = 207,  -- HI_CYAN
+}
 
 local function setupTerrainEnvs()
   if not setCustomEnvColor then return end
-  pcall(setCustomEnvColor, TERRAIN_ENV.road, 139,  90,  43, 255) -- saddle brown
-  pcall(setCustomEnvColor, TERRAIN_ENV.path, 222, 184, 135, 255) -- burlywood
+  pcall(setCustomEnvColor, TERRAIN_ENV.road,     170,  85,   0, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.path,     170, 170, 170, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.water,      0,   0, 170, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.swamp,    170,   0,   0, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.mountain,  85,  85,  85, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.plains,   255, 255,  85, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.forest,     0, 170,   0, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.ice,       85, 255, 255, 255)
 end
 
 local function mapDataPath() return getMudletHomeDir() .. "/Icesus.map.dat" end
@@ -1559,7 +1583,7 @@ function icesus.mapper.flushSave()
   icesus.mapper.dirty = false
 end
 
-function icesus.mapper.reset()
+function icesus.mapper.reset(silent)
   -- deleteMap() is the obvious choice but it leaves Mudlet's player-
   -- room pointer dangling and the next centerview() segfaults the
   -- whole client. Walk our own idToRoom and delete rooms one at a
@@ -1578,7 +1602,29 @@ function icesus.mapper.reset()
   icesus.mapper.lastHexId = nil
   icesus.mapper.dirty = false
   if updateMap then pcall(updateMap) end
-  cecho("\n<lime_green>Icesus<reset> mapper reset \226\128\148 the next room you enter will start a fresh map.\n")
+  if not silent then
+    cecho("\n<lime_green>Icesus<reset> mapper reset \226\128\148 the next room you enter will start a fresh map.\n")
+  end
+end
+
+-- Detect a stale idMap: idToRoom references rooms that Mudlet no longer
+-- knows about (e.g. player deleted the map via Mudlet's UI). Without
+-- this check, addRoom() short-circuits forever because every hexId
+-- maps to an integer that isn't a real Mudlet room, and the player
+-- "can't recreate the map" until they discover `mapper reset`.
+local function idMapIsStale(m)
+  if not m or not m.idToRoom or not getRoomName then return false end
+  local sampled, missing = 0, 0
+  for _, rid in pairs(m.idToRoom) do
+    sampled = sampled + 1
+    local ok, name = pcall(getRoomName, rid)
+    if not ok or name == nil or name == "" then
+      missing = missing + 1
+    end
+    if sampled >= 5 then break end
+  end
+  -- All sampled rooms gone = Mudlet's map was wiped externally.
+  return sampled > 0 and missing == sampled
 end
 
 function icesus.mapper.install()
@@ -1592,6 +1638,12 @@ function icesus.mapper.install()
     -- is emitted from Mudlet C++, not raised as a Lua error).
     if loadMap and io.exists and io.exists(mapDataPath()) then
       pcall(loadMap, mapDataPath())
+    end
+    if idMapIsStale(icesus.mapper.idMap) then
+      cecho("\n<yellow>Icesus<reset> mapper detected a wiped Mudlet map "
+        .. "\226\128\148 clearing stale room IDs so the next room you "
+        .. "enter starts a fresh map.\n")
+      icesus.mapper.reset(true)
     end
   end
   setupTerrainEnvs()

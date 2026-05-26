@@ -103,10 +103,12 @@ What's plumbed in:
   with Mudlet's geographic convention (north is up). The first
   coord-bearing tile in an area auto-flips it to `setGridMode` so the
   overworld renders as a pixel map.
-- **Terrain glyphs.** Road tiles paint `#` in saddle brown, path
-  tiles paint `.` in burlywood (`setRoomChar` + `setRoomEnv` from
-  `Room.Info.terrain`). The grid view ends up reading like a tiny
-  ASCII overworld.
+- **Terrain palette.** Outworld tiles paint with the pinkfish
+  classic 16-color palette from `Room.Info.terrain`: road (`#`,
+  brown), path (`.`, light gray), water (`~`, blue), swamp (`s`,
+  red), mountain (`^`, dark gray); forest is plain green,
+  plains is yellow, ice is cyan. The grid view ends up reading
+  like a tiny ASCII overworld.
 - **Indoor layout.** Server doesn't ship coords for indoor rooms.
   The package anchors each unplaced room near the last room you
   visited and scans outward for a free slot per-area, so buildings
