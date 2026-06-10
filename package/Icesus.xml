@@ -1309,6 +1309,7 @@ local function loadIdMap()
   t.placed   = t.placed   or {}
   t.gridmoded = t.gridmoded or {}     -- areaId -> true once gridmode is on
   t.areaCoords = t.areaCoords or {}   -- areaId -> { "x,y,z" -> true } occupancy
+  t.seen = t.seen or {}               -- hexId -> Room.Info signature (fast path)
   -- next_id starts above any in-use Mudlet room. createRoomID()
   -- gives us the next free int the engine knows about; we take
   -- the max of that and our saved counter so a wiped idmap with
@@ -1417,12 +1418,49 @@ local function sameKeys(a, b)
   return true
 end
 
+-- Signature of everything onRoomInfo consumes from a Room.Info
+-- payload (name, area, sorted exits, coords, terrain). Lets us tell
+-- "the player walked into a room we already mapped, unchanged" apart
+-- from "something about this room moved" without touching the map.
+local function roomSig(r)
+  local p = { tostring(r.name or ""), tostring(r.area or "") }
+  if type(r.exits) == "table" then
+    local k = {}
+    for dir, dest in pairs(r.exits) do k[#k+1] = tostring(dir) .. "=" .. tostring(dest) end
+    table.sort(k)
+    p[#p+1] = table.concat(k, ",")
+  end
+  if type(r.coords)  == "table"  then p[#p+1] = table.concat(r.coords, ",") end
+  if type(r.terrain) == "string" then p[#p+1] = r.terrain end
+  return table.concat(p, "|")
+end
+
 function icesus.mapper.onRoomInfo(r)
   if not addRoom or not setExit then return end       -- pre-mapper build
   if type(r) ~= "table" then return end
   local hexId = r.id
   if type(hexId) ~= "string" or hexId == "" then return end
   if not icesus.mapper.idMap then icesus.mapper.idMap = loadIdMap() end
+  local m = icesus.mapper.idMap
+
+  -- Fast path: a room whose signature is unchanged since we last
+  -- processed it needs no map writes at all — every set* call below
+  -- would be a no-op re-apply, but each one still marks the map
+  -- dirty, which drags saveMap + table.save behind every step and
+  -- shows up as walking latency. Just recenter the view and leave
+  -- the dirty flag alone so flushSave stays a no-op too. The cache
+  -- lives inside idMap, so it persists across sessions and is wiped
+  -- with the rest of the state on mapper reset / stale detection.
+  m.seen = m.seen or {}              -- hot-upgrade safety (pre-v1.0.14)
+  local sig = roomSig(r)
+  if m.seen[hexId] == sig then
+    local known = m.idToRoom[hexId]
+    if known and (not roomExists or roomExists(known)) then
+      if centerview then pcall(centerview, known) end
+      icesus.mapper.lastHexId = hexId
+      return
+    end
+  end
 
   local roomId = ensureRoom(hexId)
 
@@ -1442,7 +1480,6 @@ function icesus.mapper.onRoomInfo(r)
   -- player just stepped out of (lastHexId) and let freeCoord pick a
   -- collision-free spot so multiple buildings in the same area
   -- don't pile up at the origin.
-  local m = icesus.mapper.idMap
   if type(r.coords) == "table" and #r.coords >= 2 then
     local x = tonumber(r.coords[1])
     local y = tonumber(r.coords[2])
@@ -1573,6 +1610,7 @@ function icesus.mapper.onRoomInfo(r)
 
   if centerview then pcall(centerview, roomId) end
   icesus.mapper.lastHexId = hexId       -- anchor next indoor room here
+  m.seen[hexId] = sig                   -- full rebuild done — arm the fast path
   icesus.mapper.dirty = true
 end
 
@@ -1597,7 +1635,7 @@ function icesus.mapper.reset(silent)
   if os.remove then pcall(os.remove, idMapPath()) end
   icesus.mapper.idMap = {
     idToRoom = {}, areaToInt = {}, placed = {},
-    gridmoded = {}, areaCoords = {}, next_id = 1,
+    gridmoded = {}, areaCoords = {}, seen = {}, next_id = 1,
   }
   icesus.mapper.lastHexId = nil
   icesus.mapper.dirty = false
