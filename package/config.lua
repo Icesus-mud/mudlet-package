@@ -4,7 +4,7 @@ title = "Icesus official client package"
 description = [[A dedicated Mudlet interface for Icesus, a demanding but fair MUD built around deep, earned progression. Keep vitals, experience, location, exits, enemies, casting, cooldowns, effects, channels, money, favor, and carry weight visible while the text adventure stays front and center.
 
 Designed for Icesus GMCP support. Source: https://github.com/Icesus-mud/mudlet-package]]
-version = "1.0.13"
-created = "2026-05-26"
+version = "1.0.14"
+created = "2026-06-15"
 icon = ""
 dependencies = ""

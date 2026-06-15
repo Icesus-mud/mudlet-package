@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.0.14 — 2026-06-15
+
+- **Fluid walking and combat — the mapper no longer saves at a bad
+  time.** Two compounding costs were making the package feel slow on
+  well-travelled profiles (issue #4, plus in-combat lag reports):
+  - `onRoomInfo` rebuilt the room on *every* `Room.Info` — re-applying
+    `setRoomName`/`setExit`/`setRoomCoordinates` and re-marking the map
+    dirty even when you walked back through an unchanged room. Each
+    step then dragged a full `saveMap` + `table.save` behind it. The
+    package now keeps a per-room signature (name, area, sorted exits,
+    coords, terrain) in the persisted id-map; an unchanged room just
+    recenters the view and writes nothing. Any real change still
+    triggers the full rebuild. (Fast-path contributed by Steve De
+    Jongh / Arthr, PR #5.)
+  - The map was flushed to disk on a blind 30s cadence, so a large
+    accumulated map could stutter the client mid-walk or mid-fight.
+    Saving is now deferred: it happens only after ~10s idle and never
+    during combat, with a 5-minute hard cap so a crash still can't
+    lose much mapping. (Idle-deferral approach and thresholds from
+    Steve De Jongh / Arthr.)
+
+  Net effect: once you've visited a room you can speedwalk and fight
+  through it with no mapper-induced latency. Existing maps upgrade in
+  place — the signature cache fills in as you move and is wiped by
+  `mapper reset` / stale-map auto-recovery like the rest of the state.
+
 ## v1.0.13 — 2026-05-26
 
 - **Outworld terrain palette.** Server now ships categorical
