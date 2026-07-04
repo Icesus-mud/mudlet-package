@@ -15,6 +15,39 @@ end</script>
    <packageName>Icesus</packageName>
    <regex>^mapper reset$</regex>
   </Alias>
+  <Alias isActive="yes" isFolder="no">
+   <name>mapper save</name>
+   <script>if icesus and icesus.mapper and icesus.mapper.saveCommand then
+  icesus.mapper.saveCommand()
+else
+  cecho("\n&lt;red&gt;mapper save: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^mapper save$</regex>
+  </Alias>
+  <Alias isActive="yes" isFolder="no">
+   <name>mapper autosave</name>
+   <script>if icesus and icesus.mapper and icesus.mapper.autosaveCommand then
+  icesus.mapper.autosaveCommand(matches[2])
+else
+  cecho("\n&lt;red&gt;mapper autosave: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^mapper autosave(?: (on|off))?$</regex>
+  </Alias>
+  <Alias isActive="yes" isFolder="no">
+   <name>mapper on/off</name>
+   <script>if icesus and icesus.mapper and icesus.mapper.setEnabled then
+  icesus.mapper.setEnabled(matches[2] == "on")
+else
+  cecho("\n&lt;red&gt;mapper on/off: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^mapper (on|off)$</regex>
+  </Alias>
  </AliasPackage>
  <ActionPackage></ActionPackage>
  <ScriptPackage>
@@ -66,6 +99,36 @@ icesus.config = {
   -- the value text stays close to the eye on widescreens.
   expMaxW      = 720,
 }
+
+-- =============================================================
+-- Settings — player preferences persisted across sessions in
+-- getMudletHomeDir()/Icesus.settings.lua. Deliberately a separate
+-- file from the mapper idmap so `mapper reset` never wipes them.
+-- =============================================================
+local function settingsPath()
+  return getMudletHomeDir() .. "/Icesus.settings.lua"
+end
+
+function icesus.loadSettings()
+  local t = {}
+  if io.exists and io.exists(settingsPath()) then
+    pcall(table.load, settingsPath(), t)
+  end
+  icesus.settings = {
+    -- "auto": deferred idle flush (historic behaviour). "manual": the
+    -- player saves via `mapper save` / the HUD badge; the map is still
+    -- flushed on exit, disconnect and package teardown either way.
+    mapSaveMode = (t.mapSaveMode == "manual") and "manual" or "auto",
+    -- `mapper off` pauses all Room.Info processing (no room creation,
+    -- no exit rewiring, no recentering) without touching the saved
+    -- map. `mapper on` resumes.
+    mapperEnabled = (t.mapperEnabled ~= false),
+  }
+end
+
+function icesus.saveSettings()
+  if icesus.settings then pcall(table.save, settingsPath(), icesus.settings) end
+end
 
 -- =============================================================
 -- Palette — ported from webclient/css/style.css :root tokens.
@@ -228,7 +291,14 @@ end
 -- HUD construction.
 -- =============================================================
 function icesus.setupHUD()
-  if icesus.hud then return end
+  -- Self-heal a stale HUD. A hot upgrade evaluates the new script
+  -- while the previous version's widgets are still up; its teardown
+  -- runs under pcall and can die silently, leaving icesus.hud set.
+  -- Early-returning on that stale table means widgets introduced by
+  -- this version are never created — so only skip the rebuild when
+  -- the newest widget we create is actually present.
+  if icesus.hud and icesus.hud.mapSaveBadge then return end
+  if icesus.hud then icesus.teardownHUD() end
   icesus.hud = {}
 
   local P  = icesus.palette
@@ -360,11 +430,15 @@ function icesus.setupHUD()
   })
 
   -- Exits/location row at the BOTTOM of the bottom border (just above
-  -- Mudlet's command field).
+  -- Mudlet's command field). Its right end is reserved for the two
+  -- map-save controls (unsaved badge + mode pill) — separate Labels
+  -- because Qt's HTML-in-QLabel has no per-element click targets.
+  local BADGE_W = 140
+  local MODE_W  = 104
   icesus.hud.locationLabel = Geyser.Label:new({
     name = "icesus.locationLabel",
     x = 0, y = "-" .. LOC_H,
-    width = "100%-" .. R,
+    width = "100%-" .. (R + BADGE_W + MODE_W),
     height = LOC_H,
   })
   icesus.hud.locationLabel:setStyleSheet(string.format([[
@@ -378,6 +452,38 @@ function icesus.setupHUD()
   ]], P.bgPanel, P.text, P.border, FS))
   pcall(function() icesus.hud.locationLabel:setFontSize(13) end)
   icesus.hud.locationLabel:echo([[<span style="color:#555">—</span>]])
+
+  -- Map-save controls: an unsaved-changes badge (click = save now) and
+  -- a mode pill (click = toggle auto/manual saving). Chrome matches the
+  -- location row; content is painted by icesus.mapper.refreshSaveUI().
+  local function makeSaveControl(key, xOff, w)
+    local lbl = Geyser.Label:new({
+      name = "icesus." .. key,
+      x = "-" .. xOff, y = "-" .. LOC_H,
+      width = w, height = LOC_H,
+    })
+    lbl:setStyleSheet(string.format([[
+      background: %s;
+      color: %s;
+      border-top: 1px solid %s;
+      border-left: 1px solid %s;
+      font-family: %s;
+      font-size: 11pt;
+      qproperty-alignment: 'AlignCenter';
+    ]], P.bgPanel, P.textDim, P.border, P.border, FS))
+    pcall(function() lbl:setFontSize(10) end)
+    return lbl
+  end
+  icesus.hud.mapSaveBadge = makeSaveControl(
+    "mapSaveBadge", R + MODE_W + BADGE_W, BADGE_W)
+  icesus.hud.mapSaveBadge:setClickCallback(function()
+    icesus.mapper.saveCommand()
+  end)
+  icesus.hud.mapModeBtn = makeSaveControl("mapModeBtn", R + MODE_W, MODE_W)
+  icesus.hud.mapModeBtn:setClickCallback(function()
+    icesus.mapper.toggleSaveMode()
+  end)
+  icesus.mapper.refreshSaveUI()
 
   -- Slim vertical-gradient gauges. Vertical fill (top brighter, bottom
   -- darker) reads as a soft-shadowed pill instead of v0.3.3's flat block.
@@ -1415,14 +1521,6 @@ local function ensureArea(name)
   return areaId or -1
 end
 
--- Compare two ordered tables for equality (shallow, string keys).
-local function sameKeys(a, b)
-  if not a or not b then return a == b end
-  for k in pairs(a) do if b[k] == nil then return false end end
-  for k in pairs(b) do if a[k] == nil then return false end end
-  return true
-end
-
 -- Signature of everything onRoomInfo consumes from a Room.Info
 -- payload (name, area, sorted exits, coords, terrain). Lets us tell
 -- "walked back into a room we already mapped, unchanged" apart from
@@ -1443,6 +1541,9 @@ end
 
 function icesus.mapper.onRoomInfo(r)
   if not addRoom or not setExit then return end       -- pre-mapper build
+  if icesus.settings and icesus.settings.mapperEnabled == false then
+    return                                            -- paused via `mapper off`
+  end
   if type(r) ~= "table" then return end
   local hexId = r.id
   if type(hexId) ~= "string" or hexId == "" then return end
@@ -1618,26 +1719,146 @@ function icesus.mapper.onRoomInfo(r)
   if centerview then pcall(centerview, roomId) end
   icesus.mapper.lastHexId = hexId       -- anchor next indoor room here
   m.seen[hexId] = sig                   -- full rebuild done — arm the fast path
-  icesus.mapper.dirty = true
+  icesus.mapper.noteDirty()
 end
 
 function icesus.mapper.flushSave()
   if not icesus.mapper.dirty then return end
   if saveMap then pcall(saveMap, mapDataPath()) end
   saveIdMap()
-  icesus.mapper.dirty = false
+  icesus.mapper.dirty      = false
+  icesus.mapper.dirtyCount = 0
+  icesus.mapper.dirtySince = nil
+  icesus.mapper.lastSave   = os.time()
+  icesus.mapper.refreshSaveUI()
 end
 
--- Save cadence (v1.0.14). The map is flushed to disk only when the
--- player goes quiet — never mid-walk or mid-fight, where a full
--- saveMap on a large accumulated map stutters the client (issue #4
--- and the in-combat lag reports). A hard cap still guarantees a flush
--- during a very long unbroken session so a crash can't lose more than
--- MAX_SAVE_SECS of mapping. Idle-deferral approach and thresholds
--- contributed by Steve De Jongh (sdejongh / Arthr).
+-- Record one unsaved map change and surface it on the HUD badge.
+-- Called once per full onRoomInfo rebuild (the walk fast-path never
+-- gets here), so the badge counter reads as "rooms mapped since the
+-- last save".
+function icesus.mapper.noteDirty()
+  icesus.mapper.dirty      = true
+  icesus.mapper.dirtyCount = (icesus.mapper.dirtyCount or 0) + 1
+  icesus.mapper.dirtySince = icesus.mapper.dirtySince or os.time()
+  icesus.mapper.refreshSaveUI()
+end
+
+-- Keep the location-row save controls in sync: the badge shows pending
+-- unsaved changes (click = flush now), the pill shows the save mode
+-- (click = toggle auto/manual).
+function icesus.mapper.refreshSaveUI()
+  if not icesus.hud then return end
+  local badge = icesus.hud.mapSaveBadge
+  local pill  = icesus.hud.mapModeBtn
+  if badge then
+    if icesus.settings and icesus.settings.mapperEnabled == false then
+      badge:echo(
+        [[<center><span style="color:#f87171;font-weight:700">map: off</span></center>]])
+    elseif icesus.mapper.dirty then
+      badge:echo(string.format(
+        [[<center><span style="color:#fbbf24;font-weight:700">map: %d unsaved</span></center>]],
+        icesus.mapper.dirtyCount or 0))
+    else
+      badge:echo([[<center><span style="color:#555">map saved</span></center>]])
+    end
+  end
+  if pill then
+    local mode = (icesus.settings and icesus.settings.mapSaveMode) or "auto"
+    pill:echo(string.format(
+      [[<center><span style="color:%s">save: <b>%s</b></span></center>]],
+      mode == "manual" and "#7dd3fc" or "#8b90a5", mode))
+  end
+end
+
+-- `mapper save` / badge click — flush now, with feedback.
+function icesus.mapper.saveCommand()
+  if not icesus.mapper.dirty then
+    cecho("\n<lime_green>Icesus<reset> map already saved.\n")
+    return
+  end
+  local n = icesus.mapper.dirtyCount or 0
+  icesus.mapper.flushSave()
+  cecho(string.format(
+    "\n<lime_green>Icesus<reset> map saved (%d change%s flushed).\n",
+    n, n == 1 and "" or "s"))
+end
+
+function icesus.mapper.setSaveMode(mode)
+  mode = (mode == "manual") and "manual" or "auto"
+  icesus.settings = icesus.settings or {}
+  icesus.settings.mapSaveMode = mode
+  icesus.saveSettings()
+  icesus.mapper.refreshSaveUI()
+  if mode == "auto" then
+    cecho("\n<lime_green>Icesus<reset> map autosave <lime_green>on<reset> "
+      .. "\226\128\148 the map is flushed in quiet moments.\n")
+  else
+    cecho("\n<lime_green>Icesus<reset> map autosave <yellow>off<reset> "
+      .. "\226\128\148 save with <yellow>mapper save<reset> or the HUD "
+      .. "badge; the map is still saved on exit and disconnect.\n")
+  end
+end
+
+function icesus.mapper.toggleSaveMode()
+  local cur = (icesus.settings and icesus.settings.mapSaveMode) or "auto"
+  icesus.mapper.setSaveMode(cur == "auto" and "manual" or "auto")
+end
+
+-- `mapper on|off` — pause / resume the mapper entirely. Off freezes
+-- the map exactly as it is: Room.Info packets are ignored, so nothing
+-- is added, rewired or recentered, and the saved files stay put. The
+-- kill switch when the mapper misbehaves mid-session and the player
+-- doesn't want a destructive `mapper reset`. Persisted across
+-- sessions; state shows as "map: off" on the HUD badge.
+function icesus.mapper.setEnabled(on)
+  icesus.settings = icesus.settings or {}
+  icesus.settings.mapperEnabled = on and true or false
+  icesus.saveSettings()
+  icesus.mapper.refreshSaveUI()
+  if on then
+    cecho("\n<lime_green>Icesus<reset> mapper <lime_green>on<reset> "
+      .. "\226\128\148 take a step to re-sync the map.\n")
+  else
+    cecho("\n<lime_green>Icesus<reset> mapper <yellow>off<reset> "
+      .. "\226\128\148 the map is frozen (nothing added, nothing moved); "
+      .. "<yellow>mapper on<reset> to resume.\n")
+  end
+end
+
+-- `mapper autosave [on|off]` — the bare form reports the current mode.
+function icesus.mapper.autosaveCommand(arg)
+  if arg == "on" then
+    icesus.mapper.setSaveMode("auto")
+  elseif arg == "off" then
+    icesus.mapper.setSaveMode("manual")
+  else
+    local mode = (icesus.settings and icesus.settings.mapSaveMode) or "auto"
+    cecho(string.format(
+      "\n<lime_green>Icesus<reset> map autosave is <yellow>%s<reset> "
+      .. "(<yellow>mapper autosave on|off<reset> to change).\n",
+      mode == "auto" and "on" or "off"))
+  end
+end
+
+-- Save cadence. Two modes, toggled with `mapper autosave on|off` or
+-- the HUD mode pill (persisted via icesus.settings):
+--
+--   auto (default) — v1.0.14 behaviour: the map is flushed to disk
+--     only when the player goes quiet, never mid-walk or mid-fight,
+--     where a full saveMap on a large accumulated map stutters the
+--     client (issue #4). A hard cap still guarantees a flush during a
+--     very long unbroken session. Idle-deferral approach and
+--     thresholds contributed by Steve De Jongh (sdejongh / Arthr).
+--
+--   manual — no timed saves at all: the player flushes via
+--     `mapper save` or the HUD badge. A throttled console reminder
+--     fires in quiet moments once changes get old. Both modes still
+--     flush on exit, disconnect and package teardown.
 local IDLE_SAVE_SECS = 10        -- flush this long after the last move/fight
 local MAX_SAVE_SECS  = 300       -- ...but never hold unsaved changes longer
 local SAVE_POLL_SECS = 5         -- how often the idle check runs
+local REMIND_SECS    = 900       -- manual mode: nag at most this often
 
 -- Mark "the player is doing something" so the idle timer holds off.
 -- Called on every Room.Info (walking) and while Char.Status reports
@@ -1647,18 +1868,37 @@ function icesus.mapper.touchActivity()
 end
 
 -- Decide whether now is a good moment to flush. No-op unless the map
--- is dirty; otherwise flush once the player has been idle for
+-- is dirty. Auto mode: flush once the player has been idle for
 -- IDLE_SAVE_SECS and isn't fighting, or unconditionally once the map
 -- has been dirty for MAX_SAVE_SECS regardless of what they're doing.
+-- Manual mode: never flush — just emit the throttled reminder.
 function icesus.mapper.maybeFlush()
   if not icesus.mapper.dirty then return end
-  local now        = os.time()
-  local idle_for   = now - (icesus.mapper.lastActivity or 0)
+  local now       = os.time()
+  local idle_for  = now - (icesus.mapper.lastActivity or 0)
+  local in_combat = icesus.state and icesus.state.inCombat
+
+  -- Manual mode: never save on a timer. Once the oldest unsaved change
+  -- is REMIND_SECS old, drop a single console reminder in a quiet
+  -- moment, throttled to one per REMIND_SECS.
+  if icesus.settings and icesus.settings.mapSaveMode == "manual" then
+    local dirty_for = now - (icesus.mapper.dirtySince or now)
+    local last_nag  = now - (icesus.mapper.lastRemind or 0)
+    if dirty_for >= REMIND_SECS and last_nag >= REMIND_SECS
+       and not in_combat and idle_for >= IDLE_SAVE_SECS then
+      icesus.mapper.lastRemind = now
+      local n = icesus.mapper.dirtyCount or 0
+      cecho(string.format(
+        "\n<yellow>Icesus<reset> %d map change%s not saved yet "
+        .. "\226\128\148 <yellow>mapper save<reset> (or click the map "
+        .. "badge) when convenient.\n", n, n == 1 and "" or "s"))
+    end
+    return
+  end
+
   local since_save = now - (icesus.mapper.lastSave or 0)
-  local in_combat  = icesus.state and icesus.state.inCombat
   if since_save >= MAX_SAVE_SECS or (not in_combat and idle_for >= IDLE_SAVE_SECS) then
     icesus.mapper.flushSave()
-    icesus.mapper.lastSave = now
   end
 end
 
@@ -1690,8 +1930,11 @@ function icesus.mapper.reset(silent)
     idToRoom = {}, areaToInt = {}, placed = {},
     gridmoded = {}, areaCoords = {}, seen = {}, next_id = 1,
   }
-  icesus.mapper.lastHexId = nil
-  icesus.mapper.dirty = false
+  icesus.mapper.lastHexId  = nil
+  icesus.mapper.dirty      = false
+  icesus.mapper.dirtyCount = 0
+  icesus.mapper.dirtySince = nil
+  if icesus.mapper.refreshSaveUI then pcall(icesus.mapper.refreshSaveUI) end
   if updateMap then pcall(updateMap) end
   if not silent then
     cecho("\n<lime_green>Icesus<reset> mapper reset \226\128\148 the next room you enter will start a fresh map.\n")
@@ -2035,6 +2278,7 @@ function icesus.install()
   -- here closes the race; the earlier tempTimer(1) deferral was
   -- exactly wide enough to lose it.
   pcall(icesus.update.removeGenericMapper)
+  icesus.loadSettings()       -- before setupHUD: the mode pill reads it
   icesus.setupHUD()
   reg("gmcp.Char.Base",       icesus.onBase)
   reg("gmcp.Char.Vitals",     icesus.onVitals)
@@ -2049,6 +2293,13 @@ function icesus.install()
   reg("gmcp.Comm.Channel.Text",    icesus.onCommText)
   reg("sysConnectionEvent",   icesus.subscribeGMCP)
   reg("sysExitEvent",         icesus.uninstall)
+  -- A network drop / server reboot doesn't close the profile, so
+  -- sysExitEvent never fires there — flush the map on disconnect too.
+  reg("sysDisconnectionEvent", function()
+    if icesus.mapper and icesus.mapper.flushSave then
+      pcall(icesus.mapper.flushSave)
+    end
+  end)
   -- Mapper boot is deferred until the first Char.Base (see onBase):
   -- that GMCP only fires once a character is logged in, so any
   -- character-creation flow is finished by then. Booting earlier
