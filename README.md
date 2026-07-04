@@ -117,9 +117,37 @@ What's plumbed in:
   building expands cardinally as normal.
 - **Mapper-hostile rooms** (the `/void/` rifts, pre-nether) are
   silently skipped — those rooms don't pollute the map.
-- **Persistence.** The map saves every 30 seconds and on clean
-  disconnect to `<profile>/Icesus.map.dat`. Reconnect and your map
-  is right back.
+- **Persistence.** The map saves to `<profile>/Icesus.map.dat`; see
+  [Save modes](#save-modes) below for exactly when. Reconnect and
+  your map is right back.
+
+### Save modes
+
+By default (`auto`) the mapper saves itself: changes flush to disk
+the next time you go quiet — never mid-walk or mid-fight, so a big
+map never stutters the client — with a hard 300-second ceiling so a
+long unbroken session still gets flushed eventually. Switch to
+`manual` and the timer goes away entirely: you decide when to save,
+and a console reminder (at most once every 15 minutes, and only
+while you're idle and out of combat) nags you if changes have been
+sitting unsaved for a while. Either way the map is always saved when
+you close the profile, disconnect, or the package updates — the only
+real risk in manual mode is losing unsaved rooms to a Mudlet crash.
+
+Switch modes with:
+
+```
+mapper autosave     (show the current mode)
+mapper autosave on  (switch to auto, the default)
+mapper autosave off (switch to manual)
+```
+
+`mapper save` flushes immediately in either mode. The location row
+also grows two small controls at its right edge: a badge reading
+`map saved` or `map: N unsaved` (click to save now), and a `save:
+auto|manual` pill (click to toggle the mode). The chosen mode is
+remembered across sessions in `Icesus.settings.lua`, a file separate
+from the map/idmap, so `mapper reset` never resets it.
 
 If the map gets visually corrupted — most often after upgrading from
 a pre-v1.0.5 build where rooms were placed upside-down — type:
