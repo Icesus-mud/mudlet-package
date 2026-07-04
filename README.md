@@ -149,6 +149,20 @@ auto|manual` pill (click to toggle the mode). The chosen mode is
 remembered across sessions in `Icesus.settings.lua`, a file separate
 from the map/idmap, so `mapper reset` never resets it.
 
+### Pausing the mapper
+
+If the mapper starts misbehaving mid-session — recentering wrong,
+wiring bad exits — you don't have to nuke the map to make it stop.
+`mapper off` pauses tracking: incoming `Room.Info` packets are
+ignored entirely, so no rooms are created, no exits rewired, and no
+recentering happens, while the map and any saved files stay exactly
+as they are. `mapper on` resumes tracking (take a step afterward to
+resync). Unlike `mapper reset` below, this is fully non-destructive —
+use it first, and reach for `reset` only if the map itself is
+actually broken. The state persists across sessions in
+`Icesus.settings.lua`, same as the save mode, and shows on the HUD
+badge as `map: off` in red.
+
 If the map gets visually corrupted — most often after upgrading from
 a pre-v1.0.5 build where rooms were placed upside-down — type:
 

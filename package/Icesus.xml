@@ -37,6 +37,17 @@ end</script>
    <packageName>Icesus</packageName>
    <regex>^mapper autosave(?: (on|off))?$</regex>
   </Alias>
+  <Alias isActive="yes" isFolder="no">
+   <name>mapper on/off</name>
+   <script>if icesus and icesus.mapper and icesus.mapper.setEnabled then
+  icesus.mapper.setEnabled(matches[2] == "on")
+else
+  cecho("\n&lt;red&gt;mapper on/off: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^mapper (on|off)$</regex>
+  </Alias>
  </AliasPackage>
  <ActionPackage></ActionPackage>
  <ScriptPackage>
@@ -108,6 +119,10 @@ function icesus.loadSettings()
     -- player saves via `mapper save` / the HUD badge; the map is still
     -- flushed on exit, disconnect and package teardown either way.
     mapSaveMode = (t.mapSaveMode == "manual") and "manual" or "auto",
+    -- `mapper off` pauses all Room.Info processing (no room creation,
+    -- no exit rewiring, no recentering) without touching the saved
+    -- map. `mapper on` resumes.
+    mapperEnabled = (t.mapperEnabled ~= false),
   }
 end
 
@@ -1526,6 +1541,9 @@ end
 
 function icesus.mapper.onRoomInfo(r)
   if not addRoom or not setExit then return end       -- pre-mapper build
+  if icesus.settings and icesus.settings.mapperEnabled == false then
+    return                                            -- paused via `mapper off`
+  end
   if type(r) ~= "table" then return end
   local hexId = r.id
   if type(hexId) ~= "string" or hexId == "" then return end
@@ -1734,7 +1752,10 @@ function icesus.mapper.refreshSaveUI()
   local badge = icesus.hud.mapSaveBadge
   local pill  = icesus.hud.mapModeBtn
   if badge then
-    if icesus.mapper.dirty then
+    if icesus.settings and icesus.settings.mapperEnabled == false then
+      badge:echo(
+        [[<center><span style="color:#f87171;font-weight:700">map: off</span></center>]])
+    elseif icesus.mapper.dirty then
       badge:echo(string.format(
         [[<center><span style="color:#fbbf24;font-weight:700">map: %d unsaved</span></center>]],
         icesus.mapper.dirtyCount or 0))
@@ -1782,6 +1803,27 @@ end
 function icesus.mapper.toggleSaveMode()
   local cur = (icesus.settings and icesus.settings.mapSaveMode) or "auto"
   icesus.mapper.setSaveMode(cur == "auto" and "manual" or "auto")
+end
+
+-- `mapper on|off` — pause / resume the mapper entirely. Off freezes
+-- the map exactly as it is: Room.Info packets are ignored, so nothing
+-- is added, rewired or recentered, and the saved files stay put. The
+-- kill switch when the mapper misbehaves mid-session and the player
+-- doesn't want a destructive `mapper reset`. Persisted across
+-- sessions; state shows as "map: off" on the HUD badge.
+function icesus.mapper.setEnabled(on)
+  icesus.settings = icesus.settings or {}
+  icesus.settings.mapperEnabled = on and true or false
+  icesus.saveSettings()
+  icesus.mapper.refreshSaveUI()
+  if on then
+    cecho("\n<lime_green>Icesus<reset> mapper <lime_green>on<reset> "
+      .. "\226\128\148 take a step to re-sync the map.\n")
+  else
+    cecho("\n<lime_green>Icesus<reset> mapper <yellow>off<reset> "
+      .. "\226\128\148 the map is frozen (nothing added, nothing moved); "
+      .. "<yellow>mapper on<reset> to resume.\n")
+  end
 end
 
 -- `mapper autosave [on|off]` — the bare form reports the current mode.
