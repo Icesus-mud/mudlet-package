@@ -78,7 +78,7 @@ icesus = icesus or {}
 -- package info; fall back to the literal for dev hot-reload from disk
 -- (when this file isn't loaded as an installed package yet).
 icesus.version = (getPackageInfo and getPackageInfo("Icesus")
-                  and getPackageInfo("Icesus").version) or "1.0.14"
+                  and getPackageInfo("Icesus").version) or "1.0.15"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -1490,7 +1490,24 @@ end
 local function ensureRoom(hexId)
   local m = icesus.mapper.idMap
   local roomId = m.idToRoom[hexId]
-  if roomId then return roomId end
+  if roomId then
+    if not roomExists or roomExists(roomId) then return roomId end
+    -- The player deleted this room in Mudlet's map editor (issue #7).
+    -- Trusting the cached id would aim every set* call at a room that
+    -- isn't there — silent no-ops, and the room never comes back.
+    -- Re-add it under the same integer id and forget its placement
+    -- and signature so the next Room.Info rebuilds it in full.
+    if addRoom and addRoom(roomId) ~= false then
+      m.placed[hexId] = nil
+      if m.seen then m.seen[hexId] = nil end
+      icesus.mapper.dirty = true
+      return roomId
+    end
+    -- Couldn't reclaim the old id — mint a fresh one below.
+    m.idToRoom[hexId] = nil
+    m.placed[hexId]   = nil
+    if m.seen then m.seen[hexId] = nil end
+  end
   local id = m.next_id
   m.next_id = id + 1
   local ok = addRoom and addRoom(id)
@@ -1567,6 +1584,20 @@ function icesus.mapper.onRoomInfo(r)
       if centerview then pcall(centerview, known) end
       icesus.mapper.lastHexId = hexId
       return
+    end
+    -- Signature unchanged but the Mudlet room is gone — deleted in
+    -- the map editor (issue #7). Deleting it also severed each
+    -- neighbour's exit into it, and the neighbours' own signatures
+    -- still match, so they would fast-path forever with the link
+    -- missing. Forget their signatures too: the next visit rebuilds
+    -- them and rewires the way back in. Then fall through so
+    -- ensureRoom re-adds this room itself.
+    if type(r.exits) == "table" then
+      for _, dest in pairs(r.exits) do
+        if type(dest) == "string" and dest ~= "" and dest ~= "0" then
+          m.seen[dest] = nil
+        end
+      end
     end
   end
 
@@ -2158,13 +2189,23 @@ end
 -- into the player-say pane before the split.
 -- =============================================================
 
+-- Defensive colour-token strip. Some server-side composers (e.g. the
+-- hunt event's warden chatter, issue Icesus-mud/issues#667) leak raw
+-- pinkfish codes like %^BOLD%^ into GMCP chat text. They mean nothing
+-- to Mudlet and render as literal noise in the feed — drop them. The
+-- extra parens make gsub return only the string, not the match count.
+local function stripPinkfish(s)
+  if type(s) ~= "string" then return s end
+  return (s:gsub("%%%^[%w_]+%%%^", ""))
+end
+
 -- Shared echo helper. tag is the colourised header chunk (channel name,
 -- "tell", or speech kind); body is the rendered "talker: text" string.
 local function echoChannel(tag, body)
   if not icesus.hud or not icesus.hud.channels then return end
   local time = icesus.config.channelTimes and (os.date("%H:%M ")) or ""
   icesus.hud.channels:cecho(string.format(
-    "<grey>%s<reset>%s %s\n", time, tag, body))
+    "<grey>%s<reset>%s %s\n", time, tag, stripPinkfish(body)))
 end
 
 -- Render "talker: text" with self echoes styled differently so own

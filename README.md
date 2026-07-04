@@ -120,6 +120,9 @@ What's plumbed in:
 - **Persistence.** The map saves to `<profile>/Icesus.map.dat`; see
   [Save modes](#save-modes) below for exactly when. Reconnect and
   your map is right back.
+- **Deleted a room by accident?** Just walk back into it. The mapper
+  re-adds it and rewires the exits of the surrounding rooms as you
+  pass back through — no `mapper reset` needed.
 
 ### Save modes
 

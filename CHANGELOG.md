@@ -1,5 +1,51 @@
 # Changelog
 
+## v1.0.15 — 2026-07-04
+
+- **Manual or automatic map saving.** On a really big accumulated map
+  even v1.0.14's idle-deferred flush can freeze Mudlet for a few
+  seconds — Icesus' world simply outgrows what Mudlet's `saveMap`
+  handles gracefully. The save cadence is now the player's choice:
+  `auto` (default) keeps the idle-deferred flush, `manual` never saves
+  on a timer — you save via `mapper save` or the new HUD badge, with a
+  console reminder at most once per 15 minutes while idle and out of
+  combat. Two controls sit at the right end of the location row: a
+  `map saved` / `map: N unsaved` badge (click to save now) and a
+  `save: auto|manual` pill (click to toggle). Both modes still flush
+  on exit, disconnect and package teardown; a new
+  `sysDisconnectionEvent` hook covers network drops and server reboots
+  too. The choice persists in `Icesus.settings.lua`, deliberately a
+  separate file from the map state so `mapper reset` keeps it.
+  (PR #8, Steve De Jongh / sdejongh / Arthr.)
+- **`mapper on|off` — non-destructive pause.** `mapper off` freezes
+  the map exactly as it is: `Room.Info` is ignored, so nothing is
+  added, rewired or recentered, and the saved files stay put. `mapper
+  on` resumes. The kill switch for a misbehaving mapper mid-session
+  without reaching for the destructive `mapper reset`. Shows as a red
+  `map: off` on the HUD badge; persists across sessions. (PR #8,
+  Steve De Jongh / sdejongh / Arthr.)
+- **Rooms deleted in the map editor come back.** Accidentally deleting
+  a room left it un-recreatable (#7): the idmap still held its old
+  integer id, so every rebuild aimed `set*` calls at a room that
+  wasn't there, and the unchanged-room fast path skipped it — and its
+  neighbours — forever, leaving severed exits. Walking back into the
+  deleted room now re-adds it under its old id, rebuilds it in full,
+  and invalidates the neighbours' cached signatures so their exits
+  rewire as you walk back through.
+- **Channel feed: raw colour codes stripped.** Some server-side
+  composers (the hunt event's warden chatter, for one) leak raw
+  pinkfish tokens like `%^BOLD%^` into GMCP chat text; the chat panel
+  now strips them defensively before rendering.
+  (Icesus-mud/issues#667)
+- **Hot-upgrade self-heal.** `setupHUD` now rebuilds a stale HUD
+  instead of early-returning on it, so widgets introduced by a new
+  version actually appear after an auto-update whose teardown died
+  silently. (PR #8.)
+- Test harness: `tools/mudlet-dev/test_mapper.lua` grew from 17 to 62
+  checks — save modes, reminder throttle, pause toggle, settings
+  persistence across `mapper reset`, deleted-room recovery, and the
+  colour-code strip.
+
 ## v1.0.14 — 2026-06-15
 
 - **Fluid walking and combat — the mapper no longer saves at a bad
