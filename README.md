@@ -173,13 +173,18 @@ mapper restore N    (roll back to pair N; 1 = most recent)
 A restore is never destructive: the pair it replaces is set aside as
 `.bad-<timestamp>` files in the profile directory.
 
-Finally, a crash-loop guard watches the map load itself. Loading a
-damaged map file can crash Mudlet outright — and it would crash the
-same way on every login. If the package detects that the previous
-session died while loading the map, it quarantines the suspect
-map/idmap as `.bad-*` files, restores the most recent backup pair
-automatically, and tells you about it in the console. No more
-deleting map files by hand to get back into the game.
+The map load itself is guarded twice. First, the package no longer
+reloads its map file when Mudlet has already auto-loaded the profile
+map at startup (the normal case): reloading a `.dat` over thousands
+of live rooms makes the engine tear them down one at a time, which
+freezes Mudlet for minutes at login and looks exactly like a crash —
+this was the "Mudlet crashes when I connect and only deleting the
+map files fixes it" bug. Second, a crash-loop sentinel detects that
+the previous session died while the map was loading; when that
+happens the map file is skipped for one session so you can get back
+into the game, your files stay untouched on disk, and the console
+tells you — walk on to rebuild as you go, or `mapper restore` if the
+file itself is at fault. No more deleting map files by hand.
 
 ### Pausing the mapper
 

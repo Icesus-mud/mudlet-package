@@ -103,6 +103,7 @@ mud.saveMap          = function(path)
   local f = io.open(path, "wb")
   if f then f:write("MOCKMAP\n"); f:close() end
 end
+mud.loadMap          = function(path) bump("loadMap"); return true end
 mud.tempTimer        = function(secs, fn) bump("tempTimer"); return (calls.tempTimer or 0) end
 mud.killTimer        = function(id) bump("killTimer") end
 mud.cecho            = function() bump("cecho") end
@@ -735,8 +736,32 @@ do
 end
 
 do
+  -- Redundant-load guard: Mudlet auto-loads the profile's map before
+  -- scripts run, and reloading the .dat over those rooms freezes the
+  -- client for minutes on a big map. install() must only touch the
+  -- .dat when the engine doesn't already hold our rooms.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("liv00001"))
+  icesus.mapper.flushSave()                    -- .dat + idmap on disk
+  icesus.mapper.idMap = nil                    -- fresh boot, rooms live
+  calls = {}
+  icesus.mapper.install()
+  check("rooms already live: .dat not reloaded", (calls.loadMap or 0) == 0)
+  check("rooms already live: idmap reloaded",
+        icesus.mapper.idMap.idToRoom["liv00001"] ~= nil)
+
+  rooms = {}                                   -- empty engine this time
+  icesus.mapper.idMap = nil
+  calls = {}
+  icesus.mapper.install()
+  check("empty engine: .dat loaded from disk", (calls.loadMap or 0) == 1)
+end
+
+do
   -- Crash sentinel: a leftover Icesus.map.loading at install means the
-  -- previous session died inside loadMap — quarantine + auto-restore.
+  -- previous session died inside loadMap. Boot WITHOUT loading the
+  -- map, leave the files alone, and tell the player.
   local icesus = load_icesus()
   icesus.mapper.idMap = nil
   icesus.mapper.onRoomInfo(roominfo("sen00001"))
@@ -745,15 +770,21 @@ do
 
   local f = io.open(HOME .. "/Icesus.map.loading", "w")
   f:write("loading"); f:close()
+  rooms = {}                                   -- engine came up empty
   icesus.mapper.idMap = nil                    -- simulate a fresh boot
   calls = {}
   icesus.mapper.install()
   check("crash recovery announces itself", (calls.cecho or 0) >= 1)
-  check("suspect files are quarantined", countGlob("map.dat.bad-") >= 1)
-  check("backup pair restored as the live pair",
-        readAll(HOME .. "/Icesus.map.dat") == live)
-  check("idmap restored from the backup",
+  check("recovery boot does not reload the map file",
+        (calls.loadMap or 0) == 0)
+  check("live pair left untouched",
+        readAll(HOME .. "/Icesus.map.dat") == live
+        and countGlob("map.dat.bad-") == 0)
+  check("idmap still loaded on the recovery boot",
         icesus.mapper.idMap.idToRoom["sen00001"] ~= nil)
+  check("recovery boot does not reset the stale-looking idmap",
+        next(icesus.mapper.idMap.idToRoom) ~= nil
+        and fileExists(HOME .. "/Icesus.idmap.lua"))
   check("sentinel removed after recovery",
         not fileExists(HOME .. "/Icesus.map.loading"))
 
