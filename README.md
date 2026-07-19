@@ -202,10 +202,10 @@ mapper outworld roads    (roads, gates and landmarks: a lean atlas)
 mapper outworld off      (add no outworld tiles at all)
 ```
 
-Indoor zones always map normally. On tiles the mode skips, a single
-reusable `@` cursor cell tracks your position on the map — the view
-follows you across unmapped terrain without adding rooms, and the
-cursor disappears when you switch back to `full`.
+Indoor zones always map normally. On tiles the mode skips, an
+invisible cursor cell anchors the view to your grid position —
+Mudlet's own player marker shows where you are, nothing extra is
+drawn, and the cursor disappears when you switch back to `full`.
 
 The two lean modes treat existing tiles differently. Tiles properly
 mapped back in `full` mode always keep their room — the modes only

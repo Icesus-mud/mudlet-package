@@ -1461,6 +1461,10 @@ local TERRAIN_ENV  = {
   ice      = 207,  -- HI_CYAN
 }
 
+-- Fully transparent env for the position-cursor room: the cell draws
+-- nothing at all — Mudlet's own player marker is the only indicator.
+local CURSOR_ENV = 208
+
 local function setupTerrainEnvs()
   if not setCustomEnvColor then return end
   pcall(setCustomEnvColor, TERRAIN_ENV.road,     170,  85,   0, 255)
@@ -1471,6 +1475,7 @@ local function setupTerrainEnvs()
   pcall(setCustomEnvColor, TERRAIN_ENV.plains,   255, 255,  85, 255)
   pcall(setCustomEnvColor, TERRAIN_ENV.forest,     0, 170,   0, 255)
   pcall(setCustomEnvColor, TERRAIN_ENV.ice,       85, 255, 255, 255)
+  pcall(setCustomEnvColor, CURSOR_ENV,             0,   0,   0,   0)
 end
 
 local function mapDataPath() return getMudletHomeDir() .. "/Icesus.map.dat" end
@@ -1832,7 +1837,10 @@ local function moveCursor(m, r)
     end
     if not cur then return end
     m.cursorRoom = cur
-    if setRoomChar then pcall(setRoomChar, cur, "@") end
+    -- Invisible on purpose: Mudlet already draws its own player
+    -- marker on the centered room, so the cursor cell itself must
+    -- not add anything to the map.
+    if setRoomEnv then pcall(setRoomEnv, cur, CURSOR_ENV) end
     icesus.mapper.noteDirty()   -- persist cursorRoom so it's reused
   end
   if r.area and r.area ~= "" then

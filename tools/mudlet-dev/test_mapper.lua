@@ -848,7 +848,9 @@ do
         icesus.mapper.idMap.idToRoom["plain001"] == nil)
   local curId = icesus.mapper.idMap.cursorRoom
   check("skipped tile spawns the position cursor",
-        curId ~= nil and rooms[curId] ~= nil and rooms[curId].char == "@")
+        curId ~= nil and rooms[curId] ~= nil)
+  check("cursor cell is invisible (transparent env, no glyph)",
+        rooms[curId].env == 208 and rooms[curId].char == nil)
   check("cursor sits at the tile's grid coords",
         rooms[curId].coords ~= nil and rooms[curId].coords[1] == 10
         and rooms[curId].coords[2] == -21)
