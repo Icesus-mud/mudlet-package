@@ -1886,19 +1886,30 @@ function icesus.mapper.onRoomInfo(r)
       local known = m.idToRoom[hexId]
       local live = known and (not roomExists or roomExists(known))
       if live and roadsOnly then
-        -- Roads mode self-prunes: this tile wouldn't be mapped today
-        -- (bulk terrain), so riding over its full-mode-era room
-        -- deletes it and the map converges to the lean atlas. Center
-        -- the cursor FIRST so the player-room pointer never dangles
-        -- on the deleted room (the centerview segfault documented at
-        -- reset()).
-        icesus.mapper.lastHexId = nil
-        moveCursor(m, r)
-        if deleteRoom then pcall(deleteRoom, known) end
-        m.idToRoom[hexId] = nil
-        m.placed[hexId]   = nil
-        if m.seen then m.seen[hexId] = nil end
-        icesus.mapper.noteDirty()
+        -- Roads mode prunes ONLY Default Area strays — the ghost
+        -- rooms pre-created before area inheritance existed. Bulk
+        -- tiles properly mapped back in full mode keep their room:
+        -- the player chose to keep that map, we just stop growing
+        -- it. When pruning, center the cursor FIRST so the
+        -- player-room pointer never dangles on the deleted room
+        -- (the centerview segfault documented at reset()).
+        local aid = nil
+        if getRoomArea then
+          local okA, v = pcall(getRoomArea, known)
+          if okA then aid = v end
+        end
+        if aid ~= nil and aid <= 0 then
+          icesus.mapper.lastHexId = nil
+          moveCursor(m, r)
+          if deleteRoom then pcall(deleteRoom, known) end
+          m.idToRoom[hexId] = nil
+          m.placed[hexId]   = nil
+          if m.seen then m.seen[hexId] = nil end
+          icesus.mapper.noteDirty()
+        else
+          if centerview then pcall(centerview, known) end
+          icesus.mapper.lastHexId = hexId
+        end
       elseif live then
         -- off mode: the map is frozen — nothing is added or removed.
         -- Repair strays before centering: a room pre-created before
@@ -2386,7 +2397,7 @@ function icesus.mapper.outworldCommand(arg)
       roads = "roads, paths, gates and points of interest are added "
               .. "\226\128\148 a lean ridable atlas; bulk terrain "
               .. "(forest, plains, water\226\128\166) is ignored, and "
-              .. "bulk tiles you ride over are pruned from the map",
+              .. "Default Area strays are pruned as you ride over them",
       off   = "no new outworld tiles are added; indoor zones still map",
     }
     cecho(string.format("\n<lime_green>Icesus<reset> outworld mapping "

@@ -986,6 +986,21 @@ do
   check("prune marks the map dirty", icesus.mapper.dirty == true)
   check("kept road tile is untouched",
         rooms[m.idToRoom["road0010"]] ~= nil)
+
+  -- A bulk tile properly mapped in full mode (area assigned) must be
+  -- KEPT and recentered — only Default Area strays are pruned.
+  local keptId = m.next_id
+  m.next_id = keptId + 1
+  mud.addRoom(keptId)
+  rooms[keptId].area = 1                   -- full-era tile, real area
+  m.idToRoom["plainkpt"] = keptId
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("plainkpt",
+    { coords = {7,5,0}, terrain = "plains" }))
+  check("area-assigned bulk tile is kept",
+        rooms[keptId] ~= nil and (calls.deleteRoom or 0) == 0)
+  check("kept bulk tile recenters the view", (calls.centerview or 0) == 1)
+  check("kept bulk tile is not rebuilt", (calls.setRoomName or 0) == 0)
 end
 
 do

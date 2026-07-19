@@ -207,11 +207,13 @@ reusable `@` cursor cell tracks your position on the map — the view
 follows you across unmapped terrain without adding rooms, and the
 cursor disappears when you switch back to `full`.
 
-The two lean modes treat existing tiles differently. `roads` is
-self-pruning: riding over a bulk-terrain tile mapped back in `full`
-mode deletes its room, so a formerly-full map converges to the lean
-atlas along the routes you actually ride — no reset needed. `off`
-freezes the map instead: nothing is added and nothing is removed. In `roads` mode neighbouring tiles are no longer
+The two lean modes treat existing tiles differently. Tiles properly
+mapped back in `full` mode always keep their room — the modes only
+stop the map from growing. `roads` additionally prunes *Default
+Area strays* (ghost rooms pre-created by older versions, never
+assigned an area) as you ride over them, so the leftover outline
+cleans itself up along your routes. `off` is a strict freeze:
+nothing is added and nothing is removed. In `roads` mode neighbouring tiles are no longer
 pre-created (that 8-per-tile fan-out is most of the map's bulk), and
 adjacent road tiles link both ways as you ride them.
 
