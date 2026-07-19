@@ -1,12 +1,15 @@
 #!/usr/bin/env lua5.4
 -- Unit tests for the Icesus package mapper: the v1.0.14 walking/combat
 -- fluidity work, the v1.0.15 save modes / pause toggle / deleted-room
--- recovery, and the channel-feed colour-code strip.
+-- recovery, the channel-feed colour-code strip, and the map-integrity
+-- layer (atomic saves, paired backups, crash sentinel, mapper restore).
 --
 -- These load the REAL icesus.core Lua chunk straight out of
 -- package/Icesus.xml under a mocked Mudlet API, then drive
 -- icesus.mapper.* directly and assert on the recorded driver calls.
--- No GUI, no Mudlet, fully deterministic (os.time is mocked).
+-- No GUI, no Mudlet, deterministic (os.time/os.date are mocked); the
+-- persistence layer runs against a real scratch dir under /tmp that
+-- is wiped between tests.
 --
 -- Run:  lua5.4 tools/mudlet-dev/test_mapper.lua
 -- Exits non-zero on the first failing assertion.
@@ -42,6 +45,11 @@ local calls                     -- per-test driver call counters
 local rooms                     -- fake Mudlet room DB: id -> room
 local SETTINGS_ON_DISK = nil    -- non-nil: table.load fills from this
 
+-- The persistence layer (atomic sidecar writes, paired backups, the
+-- crash sentinel) manipulates real files, so the mock home is a real
+-- scratch directory wiped between tests instead of a pure no-op.
+local HOME = "/tmp/icesus-test-home"
+
 local function bump(name) calls[name] = (calls[name] or 0) + 1 end
 
 local function fresh_world()
@@ -49,11 +57,12 @@ local function fresh_world()
   rooms = {}
   MOCK_TIME = 1000
   SETTINGS_ON_DISK = nil
+  os.execute("rm -rf '" .. HOME .. "' && mkdir -p '" .. HOME .. "'")
 end
 
 local mud = {}
 
-mud.getMudletHomeDir = function() return "/tmp/icesus-test-home" end
+mud.getMudletHomeDir = function() return HOME end
 mud.createRoomID     = function() return 1 end
 
 mud.addRoom = function(id)
@@ -87,26 +96,104 @@ mud.getSpecialExits  = function(id) return rooms[id] and rooms[id].special or {}
 mud.centerview       = function(id) bump("centerview") end
 mud.updateMap        = function() bump("updateMap") end
 mud.deleteRoom       = function(id) bump("deleteRoom"); rooms[id] = nil end
-mud.saveMap          = function(path) bump("saveMap") end
+mud.saveMap          = function(path)
+  bump("saveMap")
+  -- saveMapAtomic() validates the written file (non-empty) before
+  -- promoting it, so the mock has to actually produce one.
+  local f = io.open(path, "wb")
+  if f then f:write("MOCKMAP\n"); f:close() end
+end
 mud.tempTimer        = function(secs, fn) bump("tempTimer"); return (calls.tempTimer or 0) end
 mud.killTimer        = function(id) bump("killTimer") end
 mud.cecho            = function() bump("cecho") end
 mud.echo             = function() end
 
--- Partial overrides of stdlib tables the package uses.
-mud.os = setmetatable({ time = function() return MOCK_TIME end }, { __index = os })
+-- Partial overrides of stdlib tables the package uses. os.date rides
+-- the mock clock so backup stamps are deterministic and distinct when
+-- a test advances MOCK_TIME.
+mud.os = setmetatable({
+  time = function() return MOCK_TIME end,
+  date = function(fmt, t) return os.date(fmt, t or MOCK_TIME) end,
+}, { __index = os })
+
+local SETTINGS_PATH = HOME .. "/Icesus.settings.lua"
+
+-- Settings keep the historic in-memory fixture (SETTINGS_ON_DISK);
+-- everything else hits the real scratch directory so the atomic-write
+-- and backup plumbing is exercised for real.
 mud.io = setmetatable({
-  exists = function() return SETTINGS_ON_DISK ~= nil end,
+  exists = function(path)
+    if path == SETTINGS_PATH then return SETTINGS_ON_DISK ~= nil end
+    local f = io.open(path, "r")
+    if f then f:close(); return true end
+    return false
+  end,
 }, { __index = io })
+
+-- Minimal serialiser standing in for Mudlet's table.save format:
+-- enough for the idmap's nested string/number/boolean tables.
+local function dump(v)
+  if type(v) == "table" then
+    local parts = {}
+    for k, val in pairs(v) do
+      local key
+      if type(k) == "string" then key = "[" .. string.format("%q", k) .. "]"
+      else key = "[" .. tostring(k) .. "]" end
+      parts[#parts + 1] = key .. "=" .. dump(val)
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+  elseif type(v) == "string" then
+    return string.format("%q", v)
+  else
+    return tostring(v)
+  end
+end
+
 mud.table = setmetatable({
-  save = function() bump("table_save") end,
+  save = function(path, t)
+    bump("table_save")
+    if path == SETTINGS_PATH then return end
+    local f = assert(io.open(path, "w"), "table.save: cannot open " .. path)
+    f:write("return " .. dump(t) .. "\n")
+    f:close()
+  end,
   load = function(path, t)
     bump("table_load")
-    if SETTINGS_ON_DISK and type(t) == "table" then
-      for k, v in pairs(SETTINGS_ON_DISK) do t[k] = v end
+    if path == SETTINGS_PATH then
+      if SETTINGS_ON_DISK and type(t) == "table" then
+        for k, v in pairs(SETTINGS_ON_DISK) do t[k] = v end
+      end
+      return
+    end
+    -- Mudlet's table.load raises on a missing/corrupt file; callers
+    -- pcall it, so mirror that with assert.
+    local chunk = assert(loadfile(path))
+    local v = chunk()
+    if type(v) == "table" and type(t) == "table" then
+      for k, val in pairs(v) do t[k] = val end
     end
   end,
 }, { __index = table })
+
+-- Mudlet bundles luafilesystem; plain Lua doesn't. Shell out for the
+-- three calls the backup code uses.
+mud.lfs = {
+  mkdir = function(p) os.execute("mkdir -p '" .. p .. "'"); return true end,
+  attributes = function(p, what)
+    local f = io.popen("test -d '" .. p .. "' && echo yes")
+    local out = f:read("*a"); f:close()
+    if out:find("yes") then return "directory" end
+    return nil
+  end,
+  dir = function(p)
+    local f = io.popen("ls -a '" .. p .. "' 2>/dev/null")
+    local all = {}
+    for line in f:lines() do all[#all + 1] = line end
+    f:close()
+    local i = 0
+    return function() i = i + 1; return all[i] end
+  end,
+}
 
 -- ----------------------------------------------------------------
 -- Load the chunk under the mock env.
@@ -514,6 +601,181 @@ do
   icesus.onCommTell()
   check("tell line stripped too", #lines == 2 and not lines[2]:find("%%%^"))
   check("tell text kept", #lines == 2 and lines[2]:find("hey you", 1, true) ~= nil)
+end
+
+-- ================================================================
+-- Map integrity: atomic sidecar writes, paired hourly backups, the
+-- crash-loop sentinel, and `mapper restore`.
+-- ================================================================
+local function fileExists(p)
+  local f = io.open(p, "r")
+  if f then f:close(); return true end
+  return false
+end
+local function readAll(p)
+  local f = io.open(p, "rb")
+  if not f then return nil end
+  local s = f:read("*a"); f:close(); return s
+end
+local function countGlob(pattern)
+  local f = io.popen("ls '" .. HOME .. "' '" .. HOME .. "/Icesus.backup' 2>/dev/null | grep -c '" .. pattern .. "'")
+  local n = tonumber(f:read("*a")) or 0
+  f:close()
+  return n
+end
+
+do
+  -- Atomic flush: live pair written, sidecars promoted (not left).
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("atom0001"))
+  icesus.mapper.flushSave()
+  check("flush writes the live map file", fileExists(HOME .. "/Icesus.map.dat"))
+  check("flush writes the live idmap file", fileExists(HOME .. "/Icesus.idmap.lua"))
+  check("map sidecar promoted, not left behind",
+        not fileExists(HOME .. "/Icesus.map.dat.new"))
+  check("idmap sidecar promoted, not left behind",
+        not fileExists(HOME .. "/Icesus.idmap.lua.new"))
+  local t = {}
+  local ok = pcall(function()
+    for k, v in pairs(assert(loadfile(HOME .. "/Icesus.idmap.lua"))()) do t[k] = v end
+  end)
+  check("saved idmap parses and keeps the room",
+        ok and type(t.idToRoom) == "table" and t.idToRoom["atom0001"] ~= nil)
+end
+
+do
+  -- A failed map write must keep dirty set and the live file intact.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("fail0001"))
+  icesus.mapper.flushSave()
+  local before = readAll(HOME .. "/Icesus.map.dat")
+  icesus.mapper.onRoomInfo(roominfo("fail0002"))
+  local realSaveMap = mud.saveMap
+  mud.saveMap = function(path) bump("saveMap") end     -- writes nothing
+  icesus.mapper.flushSave()
+  mud.saveMap = realSaveMap
+  check("failed save keeps the dirty flag", icesus.mapper.dirty == true)
+  check("failed save leaves the live map untouched",
+        readAll(HOME .. "/Icesus.map.dat") == before)
+  icesus.mapper.flushSave()                             -- retry succeeds
+  check("retry after failure flushes cleanly", icesus.mapper.dirty == false)
+end
+
+do
+  -- Backup cadence: first flush snapshots, hourly spacing after that,
+  -- `mapper save` always snapshots, rotation caps the history.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  local function backups()
+    local f = io.popen("ls '" .. HOME .. "/Icesus.backup' 2>/dev/null | grep -c 'map.dat$'")
+    local n = tonumber(f:read("*a")) or 0
+    f:close()
+    return n
+  end
+  icesus.mapper.onRoomInfo(roominfo("bkp00001"))
+  icesus.mapper.flushSave()
+  check("first flush of the session takes a backup", backups() == 1,
+        "backups=" .. backups())
+
+  MOCK_TIME = MOCK_TIME + 60
+  icesus.mapper.onRoomInfo(roominfo("bkp00002"))
+  icesus.mapper.flushSave()
+  check("flush inside the hour: no new generation", backups() == 1)
+
+  MOCK_TIME = MOCK_TIME + 3601
+  icesus.mapper.onRoomInfo(roominfo("bkp00003"))
+  icesus.mapper.flushSave()
+  check("flush after an hour: new generation", backups() == 2)
+
+  MOCK_TIME = MOCK_TIME + 60
+  icesus.mapper.onRoomInfo(roominfo("bkp00004"))
+  icesus.mapper.saveCommand()
+  check("explicit mapper save ignores the spacing", backups() == 3)
+
+  MOCK_TIME = MOCK_TIME + 60
+  icesus.mapper.saveCommand()                           -- map is clean
+  check("explicit save on a clean map still snapshots", backups() == 4)
+
+  for _ = 1, 4 do
+    MOCK_TIME = MOCK_TIME + 60
+    icesus.mapper.saveCommand()
+  end
+  check("rotation caps the history at 5 pairs", backups() == 5,
+        "backups=" .. backups())
+end
+
+do
+  -- `mapper restore N` rolls the live pair back and reloads it.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("res00001"))
+  icesus.mapper.flushSave()                    -- generation 1: res00001
+  MOCK_TIME = MOCK_TIME + 3601
+  icesus.mapper.onRoomInfo(roominfo("res00002"))
+  icesus.mapper.saveCommand()                  -- generation 2: both rooms
+
+  icesus.mapper.restoreCommand("1")            -- newest first
+  check("restore 1 reloads the newest idmap",
+        icesus.mapper.idMap.idToRoom["res00002"] ~= nil)
+  check("restore quarantines the replaced pair",
+        countGlob("idmap.lua.bad-") >= 1)
+  check("restore leaves a clean dirty state", icesus.mapper.dirty == false)
+
+  MOCK_TIME = MOCK_TIME + 60
+  icesus.mapper.restoreCommand("2")            -- oldest generation
+  check("restore 2 rolls back before the newer room",
+        icesus.mapper.idMap.idToRoom["res00002"] == nil
+        and icesus.mapper.idMap.idToRoom["res00001"] ~= nil)
+
+  calls = {}
+  icesus.mapper.restoreCommand("99")
+  check("restore rejects an unknown index", (calls.cecho or 0) == 1)
+end
+
+do
+  -- Crash sentinel: a leftover Icesus.map.loading at install means the
+  -- previous session died inside loadMap — quarantine + auto-restore.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("sen00001"))
+  icesus.mapper.flushSave()                    -- live pair + backup exist
+  local live = readAll(HOME .. "/Icesus.map.dat")
+
+  local f = io.open(HOME .. "/Icesus.map.loading", "w")
+  f:write("loading"); f:close()
+  icesus.mapper.idMap = nil                    -- simulate a fresh boot
+  calls = {}
+  icesus.mapper.install()
+  check("crash recovery announces itself", (calls.cecho or 0) >= 1)
+  check("suspect files are quarantined", countGlob("map.dat.bad-") >= 1)
+  check("backup pair restored as the live pair",
+        readAll(HOME .. "/Icesus.map.dat") == live)
+  check("idmap restored from the backup",
+        icesus.mapper.idMap.idToRoom["sen00001"] ~= nil)
+  check("sentinel removed after recovery",
+        not fileExists(HOME .. "/Icesus.map.loading"))
+
+  icesus.mapper.idMap = nil                    -- normal boot afterwards
+  calls = {}
+  icesus.mapper.install()
+  check("clean install leaves no sentinel",
+        not fileExists(HOME .. "/Icesus.map.loading"))
+end
+
+do
+  -- Corrupt idmap on disk: loadIdMap must warn and start clean
+  -- instead of silently doubling the map.
+  local icesus = load_icesus()
+  local f = io.open(HOME .. "/Icesus.idmap.lua", "w")
+  f:write("return {{{ this is not lua"); f:close()
+  calls = {}
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("cor00001"))
+  check("corrupt idmap triggers a warning", (calls.cecho or 0) >= 1)
+  check("mapper still maps after a corrupt idmap",
+        icesus.mapper.idMap.idToRoom["cor00001"] ~= nil)
 end
 
 print(string.format("\n%d/%d checks passed, %d failed", total - failures, total, failures))

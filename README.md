@@ -152,6 +152,35 @@ auto|manual` pill (click to toggle the mode). The chosen mode is
 remembered across sessions in `Icesus.settings.lua`, a file separate
 from the map/idmap, so `mapper reset` never resets it.
 
+### Map integrity, backups, and restore
+
+Both map files are written atomically: each save goes to a sidecar
+file first, is validated, and only then renamed over the live copy —
+a crash mid-save can never corrupt the map on disk. On top of that,
+the mapper keeps rolling **backups of the map and room-ID table as a
+pair** (Mudlet's own map backups don't cover the idmap, and one file
+is useless without the other) in `<profile>/Icesus.backup/`. A pair
+is snapshotted on the first save of each session, then at most once
+an hour, and every time you run `mapper save` explicitly — so an
+explicit save doubles as a manual restore point. The five most
+recent pairs are kept.
+
+```
+mapper restore      (list available backup pairs)
+mapper restore N    (roll back to pair N; 1 = most recent)
+```
+
+A restore is never destructive: the pair it replaces is set aside as
+`.bad-<timestamp>` files in the profile directory.
+
+Finally, a crash-loop guard watches the map load itself. Loading a
+damaged map file can crash Mudlet outright — and it would crash the
+same way on every login. If the package detects that the previous
+session died while loading the map, it quarantines the suspect
+map/idmap as `.bad-*` files, restores the most recent backup pair
+automatically, and tells you about it in the console. No more
+deleting map files by hand to get back into the game.
+
 ### Pausing the mapper
 
 If the mapper starts misbehaving mid-session — recentering wrong,
@@ -175,7 +204,8 @@ mapper reset
 
 That wipes the saved map and ID table; the next room you enter starts
 a fresh graph. The reset is per-profile, so different characters keep
-their own maps.
+their own maps. Backup pairs in `Icesus.backup/` survive a reset, so
+`mapper restore` can undo one that turns out to be a mistake.
 
 ## Resetting and reinstalling
 

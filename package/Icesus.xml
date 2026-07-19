@@ -27,6 +27,17 @@ end</script>
    <regex>^mapper save$</regex>
   </Alias>
   <Alias isActive="yes" isFolder="no">
+   <name>mapper restore</name>
+   <script>if icesus and icesus.mapper and icesus.mapper.restoreCommand then
+  icesus.mapper.restoreCommand(matches[2])
+else
+  cecho("\n&lt;red&gt;mapper restore: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^mapper restore(?: (\d+))?$</regex>
+  </Alias>
+  <Alias isActive="yes" isFolder="no">
    <name>mapper autosave</name>
    <script>if icesus and icesus.mapper and icesus.mapper.autosaveCommand then
   icesus.mapper.autosaveCommand(matches[2])
@@ -1409,11 +1420,53 @@ end
 
 local function mapDataPath() return getMudletHomeDir() .. "/Icesus.map.dat" end
 local function idMapPath()  return getMudletHomeDir() .. "/Icesus.idmap.lua" end
+local function backupDir()  return getMudletHomeDir() .. "/Icesus.backup" end
+-- Written just before loadMap, removed once the loaded map answers a
+-- probe. Still on disk at boot = the previous session died inside
+-- that window (loadMap segfaults on a truncated .dat and pcall can't
+-- catch C++ crashes) — see icesus.mapper.install.
+local function sentinelPath() return getMudletHomeDir() .. "/Icesus.map.loading" end
+
+-- Plain binary copy — Mudlet's Lua has no io.copy and the map .dat
+-- is binary ("rb"/"wb" keeps Windows from mangling it).
+local function copyFile(src, dst)
+  local fin = io.open(src, "rb")
+  if not fin then return false end
+  local data = fin:read("*a")
+  fin:close()
+  if not data then return false end
+  local fout = io.open(dst, "wb")
+  if not fout then return false end
+  fout:write(data)
+  fout:close()
+  return true
+end
+
+-- Overwrite-rename. POSIX os.rename replaces the target atomically;
+-- Windows refuses, so fall back to remove-then-rename. Dying inside
+-- that tiny window leaves the validated source file on disk, which
+-- still beats a half-written target.
+local function promote(src, dst)
+  if os.rename(src, dst) then return true end
+  os.remove(dst)
+  return os.rename(src, dst) and true or false
+end
 
 local function loadIdMap()
   local t = {}
   if io.exists and io.exists(idMapPath()) then
-    pcall(table.load, idMapPath(), t)
+    local ok = pcall(table.load, idMapPath(), t)
+    if not ok or type(t.idToRoom) ~= "table" then
+      -- The file exists but doesn't parse (truncated write, disk
+      -- glitch). Every file saveIdMap ever writes contains idToRoom,
+      -- so a miss here is corruption, not age. Starting silently from
+      -- scratch would double every room on the map — say so, and
+      -- point at the backups.
+      t = {}
+      cecho("\n<red>Icesus<reset> mapper: Icesus.idmap.lua is unreadable "
+        .. "\226\128\148 room identity data lost. <yellow>mapper "
+        .. "restore<reset> lists backups you can roll back to.\n")
+    end
   end
   t.idToRoom = t.idToRoom or {}
   t.areaToInt = t.areaToInt or {}
@@ -1479,8 +1532,128 @@ local function freeCoord(areaId, baseX, baseY, baseZ)
   return baseX, baseY, baseZ
 end
 
+-- Write the idmap atomically: serialise to a sidecar, prove the
+-- sidecar parses, then rename it over the live file. A crash
+-- mid-write can only ever cost the sidecar — the live file is always
+-- a complete, loadable snapshot.
 local function saveIdMap()
-  pcall(table.save, idMapPath(), icesus.mapper.idMap)
+  local tmp = idMapPath() .. ".new"
+  if not pcall(table.save, tmp, icesus.mapper.idMap) then
+    pcall(os.remove, tmp)
+    return false
+  end
+  local check = {}
+  if not pcall(table.load, tmp, check) or type(check.idToRoom) ~= "table" then
+    pcall(os.remove, tmp)
+    return false
+  end
+  return promote(tmp, idMapPath())
+end
+
+-- saveMap counterpart of saveIdMap: write to a sidecar, sanity-check
+-- it, rename into place. saveMap runs in Mudlet C++ and a shutdown
+-- racing it is exactly how a truncated .dat ends up crashing the next
+-- session's loadMap. No Lua-side parser exists for the binary format,
+-- so the check is call-succeeded + non-empty file.
+local function saveMapAtomic()
+  if not saveMap then return false end
+  local tmp = mapDataPath() .. ".new"
+  local ok, saved = pcall(saveMap, tmp)
+  if not ok or saved == false then
+    pcall(os.remove, tmp)
+    return false
+  end
+  local f = io.open(tmp, "rb")
+  local size = f and f:seek("end") or 0
+  if f then f:close() end
+  if size == 0 then
+    pcall(os.remove, tmp)
+    return false
+  end
+  return promote(tmp, mapDataPath())
+end
+
+-- =============================================================
+-- Backups — a successful flush may snapshot map + idmap as a PAIR
+-- into Icesus.backup/. The two files only make sense together:
+-- Mudlet's own map backups can't recover anything because nothing
+-- backs up the idmap that names those rooms. Generations are spaced
+-- >= BACKUP_SPACING_SECS apart (sessions run long; snapshotting
+-- every idle flush would rotate the whole history away in minutes),
+-- except the first flush of a session and an explicit `mapper save`,
+-- which always snapshot.
+-- =============================================================
+local BACKUP_KEEP         = 5
+local BACKUP_SPACING_SECS = 3600
+
+-- Backup pairs on disk, oldest first. Pair = same stamp on both
+-- files; a half-pair (interrupted copy) is ignored.
+local function listBackups()
+  local out = {}
+  if not (lfs and lfs.dir and io.exists) then return out end
+  if lfs.attributes(backupDir(), "mode") ~= "directory" then return out end
+  local ok, iter, obj = pcall(lfs.dir, backupDir())
+  if not ok then return out end
+  for f in iter, obj do
+    local stamp = f:match("^(%d+%-%d+)%.map%.dat$")
+    if stamp and io.exists(backupDir() .. "/" .. stamp .. ".idmap.lua") then
+      out[#out + 1] = stamp
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+local function makeBackup(force)
+  if not (io.exists and io.exists(mapDataPath()) and io.exists(idMapPath())) then
+    return
+  end
+  local now = os.time()
+  if not force and icesus.mapper.lastBackup
+     and now - icesus.mapper.lastBackup < BACKUP_SPACING_SECS then
+    return
+  end
+  if lfs and lfs.mkdir then pcall(lfs.mkdir, backupDir()) end
+  local base = backupDir() .. "/" .. os.date("%Y%m%d-%H%M%S")
+  if copyFile(mapDataPath(), base .. ".map.dat")
+     and copyFile(idMapPath(), base .. ".idmap.lua") then
+    icesus.mapper.lastBackup = now
+    local stamps = listBackups()
+    for i = 1, #stamps - BACKUP_KEEP do
+      pcall(os.remove, backupDir() .. "/" .. stamps[i] .. ".map.dat")
+      pcall(os.remove, backupDir() .. "/" .. stamps[i] .. ".idmap.lua")
+    end
+  else
+    -- a half-written pair is worse than none
+    pcall(os.remove, base .. ".map.dat")
+    pcall(os.remove, base .. ".idmap.lua")
+  end
+end
+
+-- Copy a backup pair over the live files. Callers reload afterwards.
+local function restoreBackupPair(stamp)
+  local base = backupDir() .. "/" .. stamp
+  if not (io.exists and io.exists(base .. ".map.dat")
+          and io.exists(base .. ".idmap.lua")) then
+    return false
+  end
+  return copyFile(base .. ".map.dat", mapDataPath())
+     and copyFile(base .. ".idmap.lua", idMapPath())
+end
+
+-- Move the live pair out of the way, kept as .bad-<stamp> for
+-- post-mortem instead of deleted.
+local function quarantineLivePair()
+  local stamp = os.date("%Y%m%d-%H%M%S")
+  for _, p in ipairs({ mapDataPath(), idMapPath() }) do
+    if io.exists and io.exists(p) then pcall(promote, p, p .. ".bad-" .. stamp) end
+  end
+end
+
+local function fmtStamp(stamp)
+  local y, mo, d, h, mi = stamp:match("^(%d%d%d%d)(%d%d)(%d%d)%-(%d%d)(%d%d)")
+  if not y then return stamp end
+  return string.format("%s-%s-%s %s:%s", y, mo, d, h, mi)
 end
 
 -- Resolve a server hex_id to a Mudlet integer roomID, creating the
@@ -1753,10 +1926,18 @@ function icesus.mapper.onRoomInfo(r)
   icesus.mapper.noteDirty()
 end
 
-function icesus.mapper.flushSave()
+function icesus.mapper.flushSave(forceBackup)
   if not icesus.mapper.dirty then return end
-  if saveMap then pcall(saveMap, mapDataPath()) end
-  saveIdMap()
+  local mapOk = saveMapAtomic()
+  local idOk  = saveIdMap()
+  if not (mapOk and idOk) then
+    -- Failed write (disk full, locked file): keep the dirty flag so
+    -- the idle poll retries and the HUD badge keeps telling the
+    -- truth. The live files still hold the previous good snapshot —
+    -- that's the point of the sidecar-then-rename dance.
+    return
+  end
+  makeBackup(forceBackup)
   icesus.mapper.dirty      = false
   icesus.mapper.dirtyCount = 0
   icesus.mapper.dirtySince = nil
@@ -1805,14 +1986,78 @@ end
 -- `mapper save` / badge click — flush now, with feedback.
 function icesus.mapper.saveCommand()
   if not icesus.mapper.dirty then
-    cecho("\n<lime_green>Icesus<reset> map already saved.\n")
+    -- Nothing to flush, but an explicit save is a request for a
+    -- restore point — snapshot the current pair regardless of the
+    -- hourly spacing.
+    makeBackup(true)
+    cecho("\n<lime_green>Icesus<reset> map already saved (backup refreshed).\n")
     return
   end
   local n = icesus.mapper.dirtyCount or 0
-  icesus.mapper.flushSave()
+  icesus.mapper.flushSave(true)
+  if icesus.mapper.dirty then
+    cecho("\n<red>Icesus<reset> map save failed \226\128\148 the previous "
+      .. "snapshot on disk is untouched; check disk space and retry.\n")
+    return
+  end
   cecho(string.format(
     "\n<lime_green>Icesus<reset> map saved (%d change%s flushed).\n",
     n, n == 1 and "" or "s"))
+end
+
+-- `mapper restore` — list backup pairs; `mapper restore <n>` — roll
+-- the live map + idmap back to pair n (1 = most recent). The current
+-- pair is quarantined as .bad-<stamp> first, so a restore is never
+-- destructive.
+function icesus.mapper.restoreCommand(arg)
+  local stamps = listBackups()
+  if #stamps == 0 then
+    cecho("\n<yellow>Icesus<reset> no map backups yet \226\128\148 one is "
+      .. "taken on the first save of each session, then hourly, and on "
+      .. "every explicit <yellow>mapper save<reset>.\n")
+    return
+  end
+  local ordered = {}
+  for i = #stamps, 1, -1 do ordered[#ordered + 1] = stamps[i] end
+  if not arg or arg == "" then
+    cecho("\n<lime_green>Icesus<reset> map backups "
+      .. "(<yellow>mapper restore N<reset> to roll back):\n")
+    for i, stamp in ipairs(ordered) do
+      cecho(string.format("  <yellow>%d<reset>  %s\n", i, fmtStamp(stamp)))
+    end
+    return
+  end
+  local n = tonumber(arg)
+  local stamp = n and ordered[n]
+  if not stamp then
+    cecho(string.format(
+      "\n<red>Icesus<reset> no backup #%s \226\128\148 <yellow>mapper "
+      .. "restore<reset> lists the %d available.\n", tostring(arg), #ordered))
+    return
+  end
+  quarantineLivePair()
+  if not restoreBackupPair(stamp) then
+    cecho("\n<red>Icesus<reset> restore failed \226\128\148 backup pair "
+      .. "unreadable. The current map was set aside as .bad-* files in "
+      .. "the profile folder.\n")
+    return
+  end
+  -- Reload the restored pair in place of the in-memory state.
+  icesus.mapper.idMap = nil
+  if loadMap and io.exists and io.exists(mapDataPath()) then
+    pcall(loadMap, mapDataPath())
+  end
+  icesus.mapper.idMap = loadIdMap()
+  icesus.mapper.lastHexId  = nil
+  icesus.mapper.dirty      = false
+  icesus.mapper.dirtyCount = 0
+  icesus.mapper.dirtySince = nil
+  if updateMap then pcall(updateMap) end
+  icesus.mapper.refreshSaveUI()
+  cecho(string.format(
+    "\n<lime_green>Icesus<reset> map restored from backup %s. The map "
+    .. "you replaced is kept as .bad-* files. Take a step to re-sync.\n",
+    fmtStamp(stamp)))
 end
 
 function icesus.mapper.setSaveMode(mode)
@@ -1996,7 +2241,34 @@ function icesus.mapper.install()
   -- Restore persisted state up front so the player's existing map
   -- shows in F11 even before any Room.Info arrives this session.
   if not icesus.mapper.idMap then
-    icesus.mapper.idMap = loadIdMap()
+    -- Crash-loop guard. The sentinel below only survives on disk if
+    -- the previous session died between writing it and the probe a
+    -- few lines further down — in practice loadMap segfaulting on a
+    -- bad .dat, which pcall can't catch. Reloading the same file
+    -- would crash every login until the player deletes it by hand,
+    -- so quarantine the pair and fall back to the newest backup.
+    if io.exists and io.exists(sentinelPath()) then
+      pcall(os.remove, sentinelPath())
+      quarantineLivePair()
+      local stamps = listBackups()
+      local restored = nil
+      if #stamps > 0 and restoreBackupPair(stamps[#stamps]) then
+        restored = stamps[#stamps]
+      end
+      if restored then
+        cecho("\n<red>Icesus<reset> the last session crashed while "
+          .. "loading the map. The suspect map/idmap were set aside as "
+          .. ".bad-* files and the backup from <yellow>"
+          .. fmtStamp(restored) .. "<reset> was restored.\n")
+      else
+        cecho("\n<red>Icesus<reset> the last session crashed while "
+          .. "loading the map and no backup pair was available. The "
+          .. "suspect files were set aside as .bad-* \226\128\148 the "
+          .. "next room you enter starts a fresh map.\n")
+      end
+    end
+    local sf = io.open(sentinelPath(), "w")
+    if sf then sf:write("loading") sf:close() end
     -- Skip loadMap on a fresh profile — Mudlet logs a noisy
     -- "Unable to open map file for reading" + debug dump when the
     -- file is missing, and pcall doesn't suppress it (the message
@@ -2004,12 +2276,20 @@ function icesus.mapper.install()
     if loadMap and io.exists and io.exists(mapDataPath()) then
       pcall(loadMap, mapDataPath())
     end
+    -- idmap AFTER loadMap: loadIdMap seeds next_id from
+    -- createRoomID(), which only knows the .dat's rooms once they
+    -- are loaded. The old order left the collision guard blind.
+    icesus.mapper.idMap = loadIdMap()
     if idMapIsStale(icesus.mapper.idMap) then
       cecho("\n<yellow>Icesus<reset> mapper detected a wiped Mudlet map "
         .. "\226\128\148 clearing stale room IDs so the next room you "
         .. "enter starts a fresh map.\n")
       icesus.mapper.reset(true)
     end
+    -- idMapIsStale just probed the loaded map via getRoomName —
+    -- reaching this line means the .dat loaded and answers queries,
+    -- so the crash window is over.
+    pcall(os.remove, sentinelPath())
   end
   setupTerrainEnvs()
   -- Seed the save clock so the cap measures from boot, then start the
