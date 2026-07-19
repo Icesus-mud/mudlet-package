@@ -198,7 +198,7 @@ full pixel map, thin it out:
 ```
 mapper outworld          (show the current mode)
 mapper outworld full     (map every tile — the default)
-mapper outworld roads    (only road/path tiles: a lean ridable atlas)
+mapper outworld roads    (roads, gates and landmarks: a lean atlas)
 mapper outworld off      (add no outworld tiles at all)
 ```
 
@@ -206,7 +206,16 @@ Indoor zones always map normally. The modes only gate *new* tiles:
 anything already mapped stays on the map and the view still recenters
 on it as you ride. In `roads` mode neighbouring tiles are no longer
 pre-created (that 8-per-tile fan-out is most of the map's bulk), and
-adjacent road tiles link both ways as you ride them. To shrink an
+adjacent road tiles link both ways as you ride them.
+
+What `roads` keeps is defined by exclusion, on purpose: only the six
+bulk-fill terrains (forest, plains, water, swamp, mountain, ice) with
+nothing but plain cardinal exits are skipped. Roads and paths, city
+gates (`c`), points of interest (`?`), tiles with unknown terrain
+codes, and any tile with a special exit (it leads somewhere) are all
+kept — so landmark tiles survive even when the server labels them
+with codes this package has never seen. Unknown short codes are also
+drawn as the room glyph, mirroring the game's own overhead map. To shrink an
 already-large map, pick a mode and then `mapper reset` to rebuild
 lean from scratch — on a big map the reset itself can freeze Mudlet
 for a minute or two; let it finish. The setting persists across

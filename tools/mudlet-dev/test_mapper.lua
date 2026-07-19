@@ -841,6 +841,39 @@ do
   check("adjacent road tiles link back (grid symmetry)",
         rooms[idA].exits.east == idB)
 
+  -- Special tiles must survive roads mode: unknown codes (city gates
+  -- 'c', points of interest '?'), missing terrain, and bulk terrain
+  -- that carries a special exit.
+  icesus.mapper.onRoomInfo(roominfo("gate0001",
+    { coords = {13,20,0}, terrain = "c", exits = { east = "road0002" } }))
+  check("roads mode keeps a city-gate tile ('c')",
+        icesus.mapper.idMap.idToRoom["gate0001"] ~= nil)
+  local idGate = icesus.mapper.idMap.idToRoom["gate0001"]
+  check("unknown short code renders as its own glyph",
+        rooms[idGate].char == "c")
+
+  icesus.mapper.onRoomInfo(roominfo("poi00001",
+    { coords = {14,20,0}, terrain = "?", exits = { west = "gate0001" } }))
+  check("roads mode keeps a point-of-interest tile ('?')",
+        icesus.mapper.idMap.idToRoom["poi00001"] ~= nil)
+
+  icesus.mapper.onRoomInfo(roominfo("bare0001",
+    { coords = {15,20,0}, exits = { west = "poi00001" } }))
+  check("roads mode keeps a tile with no terrain",
+        icesus.mapper.idMap.idToRoom["bare0001"] ~= nil)
+
+  icesus.mapper.onRoomInfo(roominfo("cave0001",
+    { coords = {16,20,0}, terrain = "forest",
+      exits = { west = "bare0001", ["enter cave"] = "indoor01" } }))
+  check("roads mode keeps bulk terrain with a special exit",
+        icesus.mapper.idMap.idToRoom["cave0001"] ~= nil)
+
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("plainzz1",
+    { coords = {17,20,0}, terrain = "plains", exits = { west = "cave0001" } }))
+  check("roads mode still skips plain bulk terrain",
+        icesus.mapper.idMap.idToRoom["plainzz1"] == nil)
+
   icesus.settings.outworldMode = "off"
   calls = {}
   icesus.mapper.onRoomInfo(roominfo("plain002",

@@ -1404,6 +1404,33 @@ local DIR_OPPOSITE = {
   up="down", down="up", ["in"]="out", out="in",
 }
 
+-- The six bulk-fill terrains — what roads mode exists to NOT map.
+-- The filter is deliberately inverted (skip these, keep everything
+-- else) so special tiles survive without us having to enumerate
+-- them: city gates and points of interest ship their own codes
+-- ('c', '?', …) or none at all, and an unknown code must always mean
+-- "interesting", never "dropped".
+local BULK_TERRAIN = {
+  water=true, swamp=true, mountain=true,
+  plains=true, forest=true, ice=true,
+}
+
+-- Roads-mode verdict for an outworld tile: skip only a recognised
+-- bulk fill with nothing but plain cardinal exits. Roads, paths,
+-- unknown codes, missing terrain, and any tile with a special exit
+-- (it leads somewhere — a gate, an entrance) are all kept.
+local function outworldBulk(r)
+  local t = r.terrain
+  if t == nil or t == "road" or t == "path" then return false end
+  if not BULK_TERRAIN[t] then return false end
+  if type(r.exits) == "table" then
+    for dir in pairs(r.exits) do
+      if not CARDINALS[dir] then return false end
+    end
+  end
+  return true
+end
+
 -- Terrain glyph + env mapping. Server ships r.terrain for outworld
 -- tiles as categorical names (see gmcp_d.c::send_room_info: road,
 -- path, water, swamp, mountain, plains, forest, ice). We render
@@ -1823,8 +1850,7 @@ function icesus.mapper.onRoomInfo(r)
   local owMode = (icesus.settings and icesus.settings.outworldMode) or "full"
   local roadsOnly = isOutworld and owMode == "roads"
   if isOutworld and owMode ~= "full" then
-    local isRoad = r.terrain == "road" or r.terrain == "path"
-    if owMode == "off" or (roadsOnly and not isRoad) then
+    if owMode == "off" or (roadsOnly and outworldBulk(r)) then
       local known = m.idToRoom[hexId]
       if known and (not roomExists or roomExists(known)) then
         if centerview then pcall(centerview, known) end
@@ -1937,6 +1963,13 @@ function icesus.mapper.onRoomInfo(r)
   -- keeps Mudlet's default rendering.
   if type(r.terrain) == "string" then
     local tc = TERRAIN_CHAR[r.terrain]
+    if not tc and #r.terrain <= 2 and not TERRAIN_ENV[r.terrain] then
+      -- Unknown short code ('c' gates, '?' points of interest, legacy
+      -- single-char terrains): render it as-is, like the game's own
+      -- overhead map does. The length guard keeps full words like
+      -- "plains" from being painted into a room cell.
+      tc = r.terrain
+    end
     if tc and setRoomChar then pcall(setRoomChar, roomId, tc) end
     local te = TERRAIN_ENV[r.terrain]
     if te and setRoomEnv  then pcall(setRoomEnv,  roomId, te) end
@@ -2265,8 +2298,9 @@ function icesus.mapper.outworldCommand(arg)
     icesus.saveSettings()
     local desc = {
       full  = "every tile is mapped (the default)",
-      roads = "only road and path tiles are added \226\128\148 a lean "
-              .. "ridable atlas; other terrain is ignored",
+      roads = "roads, paths, gates and points of interest are added "
+              .. "\226\128\148 a lean ridable atlas; bulk terrain "
+              .. "(forest, plains, water\226\128\166) is ignored",
       off   = "no new outworld tiles are added; indoor zones still map",
     }
     cecho(string.format("\n<lime_green>Icesus<reset> outworld mapping "
