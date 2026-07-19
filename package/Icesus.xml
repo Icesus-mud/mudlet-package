@@ -1837,11 +1837,17 @@ local function moveCursor(m, r)
     end
     if not cur then return end
     m.cursorRoom = cur
-    -- Invisible on purpose: Mudlet already draws its own player
-    -- marker on the centered room, so the cursor cell itself must
-    -- not add anything to the map.
-    if setRoomEnv then pcall(setRoomEnv, cur, CURSOR_ENV) end
     icesus.mapper.noteDirty()   -- persist cursorRoom so it's reused
+  end
+  -- Invisible on purpose: Mudlet already draws its own player marker
+  -- on the centered room, so the cursor cell itself must not add
+  -- anything to the map. Restyled once per session (not just at
+  -- creation) so a cursor inherited from an older build loses its
+  -- '@' glyph too.
+  if not icesus.mapper.cursorStyled then
+    icesus.mapper.cursorStyled = true
+    if setRoomEnv  then pcall(setRoomEnv,  cur, CURSOR_ENV) end
+    if setRoomChar then pcall(setRoomChar, cur, "") end
   end
   if r.area and r.area ~= "" then
     local areaId = ensureArea(tostring(r.area))
