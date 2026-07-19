@@ -188,6 +188,30 @@ into the game, your files stay untouched on disk, and the console
 tells you — walk on to rebuild as you go, or `mapper restore` if the
 file itself is at fault. No more deleting map files by hand.
 
+### Outworld mapping modes
+
+The outworld grid is where a map gets big: on a mature map it holds
+95%+ of the rooms, all in one giant gridmode area — which is also
+what makes engine-side map operations slow. If you don't need the
+full pixel map, thin it out:
+
+```
+mapper outworld          (show the current mode)
+mapper outworld full     (map every tile — the default)
+mapper outworld roads    (only road/path tiles: a lean ridable atlas)
+mapper outworld off      (add no outworld tiles at all)
+```
+
+Indoor zones always map normally. The modes only gate *new* tiles:
+anything already mapped stays on the map and the view still recenters
+on it as you ride. In `roads` mode neighbouring tiles are no longer
+pre-created (that 8-per-tile fan-out is most of the map's bulk), and
+adjacent road tiles link both ways as you ride them. To shrink an
+already-large map, pick a mode and then `mapper reset` to rebuild
+lean from scratch — on a big map the reset itself can freeze Mudlet
+for a minute or two; let it finish. The setting persists across
+sessions and survives `mapper reset`.
+
 ### Pausing the mapper
 
 If the mapper starts misbehaving mid-session — recentering wrong,

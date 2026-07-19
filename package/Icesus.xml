@@ -59,6 +59,17 @@ end</script>
    <packageName>Icesus</packageName>
    <regex>^mapper (on|off)$</regex>
   </Alias>
+  <Alias isActive="yes" isFolder="no">
+   <name>mapper outworld</name>
+   <script>if icesus and icesus.mapper and icesus.mapper.outworldCommand then
+  icesus.mapper.outworldCommand(matches[2])
+else
+  cecho("\n&lt;red&gt;mapper outworld: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^mapper outworld(?: (full|roads|off))?$</regex>
+  </Alias>
  </AliasPackage>
  <ActionPackage></ActionPackage>
  <ScriptPackage>
@@ -134,6 +145,13 @@ function icesus.loadSettings()
     -- no exit rewiring, no recentering) without touching the saved
     -- map. `mapper on` resumes.
     mapperEnabled = (t.mapperEnabled ~= false),
+    -- `mapper outworld full|roads|off` — how much of the outworld
+    -- grid gets mapped. The outworld is 95+% of a mature map's rooms
+    -- and all of it lands in one giant gridmode area, which is what
+    -- makes engine-side room teardown so slow; "roads" keeps just
+    -- the road/path network, "off" adds no outworld tiles at all.
+    outworldMode = (t.outworldMode == "roads" or t.outworldMode == "off")
+                   and t.outworldMode or "full",
   }
 end
 
@@ -1376,6 +1394,16 @@ local DIR_OFFSET = {
   ["in"]    = { 0,  0, 0 }, out       = { 0,  0, 0 },
 }
 
+-- Used by roads-mode outworld linking: the grid is geometrically
+-- symmetric, so when tile B links back to already-mapped tile A we
+-- can wire A -> B immediately instead of waiting for A's own rebuild.
+local DIR_OPPOSITE = {
+  north="south", south="north", east="west", west="east",
+  northeast="southwest", southwest="northeast",
+  northwest="southeast", southeast="northwest",
+  up="down", down="up", ["in"]="out", out="in",
+}
+
 -- Terrain glyph + env mapping. Server ships r.terrain for outworld
 -- tiles as categorical names (see gmcp_d.c::send_room_info: road,
 -- path, water, swamp, mountain, plains, forest, ice). We render
@@ -1720,7 +1748,7 @@ local function ensureRoom(hexId)
       m.placed[hexId] = nil
       if m.seen then m.seen[hexId] = nil end
       icesus.mapper.dirty = true
-      return roomId
+      return roomId, true
     end
     -- Couldn't reclaim the old id — mint a fresh one below.
     m.idToRoom[hexId] = nil
@@ -1740,7 +1768,7 @@ local function ensureRoom(hexId)
   end
   m.idToRoom[hexId] = id
   icesus.mapper.dirty = true
-  return id
+  return id, true
 end
 
 local function ensureArea(name)
@@ -1787,6 +1815,27 @@ function icesus.mapper.onRoomInfo(r)
   local m = icesus.mapper.idMap
   icesus.mapper.touchActivity()       -- walking = activity, defers the save
 
+  -- Outworld thinning (`mapper outworld roads|off`). Tiles mapped
+  -- before a mode switch stay useful — recenter on them, add nothing;
+  -- unmapped tiles are ignored entirely. Indoor zones (no coords) are
+  -- never affected.
+  local isOutworld = type(r.coords) == "table" and #r.coords >= 2
+  local owMode = (icesus.settings and icesus.settings.outworldMode) or "full"
+  local roadsOnly = isOutworld and owMode == "roads"
+  if isOutworld and owMode ~= "full" then
+    local isRoad = r.terrain == "road" or r.terrain == "path"
+    if owMode == "off" or (roadsOnly and not isRoad) then
+      local known = m.idToRoom[hexId]
+      if known and (not roomExists or roomExists(known)) then
+        if centerview then pcall(centerview, known) end
+        icesus.mapper.lastHexId = hexId
+      else
+        icesus.mapper.lastHexId = nil   -- don't anchor buildings to a ghost
+      end
+      return
+    end
+  end
+
   -- Fast path: a room whose signature is unchanged since we last
   -- processed it needs no map writes at all — every set* call below
   -- would re-apply identical data, but each one still marks the map
@@ -1820,7 +1869,18 @@ function icesus.mapper.onRoomInfo(r)
     end
   end
 
-  local roomId = ensureRoom(hexId)
+  local roomId, createdNow = ensureRoom(hexId)
+
+  -- A room the neighbours couldn't link to before now exists — forget
+  -- their signatures so their next visit rebuilds and wires the way
+  -- in. Matters most in roads mode, where neighbours aren't
+  -- pre-created and the late arrival would otherwise stay unlinked
+  -- behind their fast-path forever.
+  if createdNow and type(r.exits) == "table" and m.seen then
+    for _, dest in pairs(r.exits) do
+      if type(dest) == "string" then m.seen[dest] = nil end
+    end
+  end
 
   -- Room name + area. Update unconditionally: rare renames + area
   -- changes both need to propagate.
@@ -1900,9 +1960,17 @@ function icesus.mapper.onRoomInfo(r)
         end
         if CARDINALS[dir] then
           liveCardinals[dir] = true
-          if destHash then
+          -- Roads mode: don't pre-create unmapped outworld
+          -- neighbours — that 8-per-tile fan-out is what balloons
+          -- the outworld area. Link tiles already on the map, stub
+          -- the rest.
+          local linkable = destHash and (not roadsOnly or m.idToRoom[destHash])
+          if linkable then
             local destId = ensureRoom(destHash)
             pcall(setExit, roomId, destId, dir)
+            if roadsOnly and DIR_OPPOSITE[dir] then
+              pcall(setExit, destId, roomId, DIR_OPPOSITE[dir])
+            end
             -- Position unplaced destinations relative to this room so
             -- Mudlet draws a graph instead of stacking everything at
             -- the origin. Once a room has coords (here or via server
@@ -1925,7 +1993,7 @@ function icesus.mapper.onRoomInfo(r)
           end
         else
           liveSpecials[dir] = true
-          if destHash then
+          if destHash and (not roadsOnly or m.idToRoom[destHash]) then
             local destId = ensureRoom(destHash)
             pcall(setSpecialExit, roomId, destId, dir)
           end
@@ -1957,7 +2025,8 @@ function icesus.mapper.onRoomInfo(r)
           pcall(clearSpecialExits, roomId)
           for cmd in pairs(liveSpecials) do
             local destHash = exits[cmd]
-            if destHash and destHash ~= "0" then
+            if destHash and destHash ~= "0"
+               and (not roadsOnly or m.idToRoom[destHash]) then
               pcall(setSpecialExit, roomId, ensureRoom(destHash), cmd)
             end
           end
@@ -2183,6 +2252,33 @@ function icesus.mapper.setEnabled(on)
     cecho("\n<lime_green>Icesus<reset> mapper <yellow>off<reset> "
       .. "\226\128\148 the map is frozen (nothing added, nothing moved); "
       .. "<yellow>mapper on<reset> to resume.\n")
+  end
+end
+
+-- `mapper outworld [full|roads|off]` — how much of the outworld grid
+-- gets mapped; the bare form reports the current mode. Only affects
+-- NEW tiles: existing ones stay on the map and still recenter.
+function icesus.mapper.outworldCommand(arg)
+  if arg == "full" or arg == "roads" or arg == "off" then
+    icesus.settings = icesus.settings or {}
+    icesus.settings.outworldMode = arg
+    icesus.saveSettings()
+    local desc = {
+      full  = "every tile is mapped (the default)",
+      roads = "only road and path tiles are added \226\128\148 a lean "
+              .. "ridable atlas; other terrain is ignored",
+      off   = "no new outworld tiles are added; indoor zones still map",
+    }
+    cecho(string.format("\n<lime_green>Icesus<reset> outworld mapping "
+      .. "<yellow>%s<reset> \226\128\148 %s. Tiles already mapped stay "
+      .. "put (<yellow>mapper reset<reset> to rebuild lean from "
+      .. "scratch).\n", arg, desc[arg]))
+  else
+    local mode = (icesus.settings and icesus.settings.outworldMode) or "full"
+    cecho(string.format(
+      "\n<lime_green>Icesus<reset> outworld mapping is <yellow>%s<reset> "
+      .. "(<yellow>mapper outworld full|roads|off<reset> to change).\n",
+      mode))
   end
 end
 

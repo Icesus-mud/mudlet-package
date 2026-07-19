@@ -810,6 +810,65 @@ do
 end
 
 do
+  -- Outworld thinning: `mapper outworld roads|off` caps the giant
+  -- gridmode area that dominates map size.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.loadSettings()
+  check("outworld mode defaults to full", icesus.settings.outworldMode == "full")
+
+  icesus.settings.outworldMode = "roads"
+  local rA = roominfo("road0001", { coords = {10,20,0}, terrain = "road",
+                                    exits = { east = "road0002", north = "plain001" } })
+  calls = {}
+  icesus.mapper.onRoomInfo(rA)
+  check("roads mode maps a road tile",
+        icesus.mapper.idMap.idToRoom["road0001"] ~= nil)
+  check("roads mode does not pre-create neighbours",
+        (calls.addRoom or 0) == 1, "addRoom=" .. (calls.addRoom or 0))
+
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("plain001",
+    { coords = {10,21,0}, terrain = "plains", exits = { south = "road0001" } }))
+  check("roads mode skips a plains tile", (calls.addRoom or 0) == 0
+        and icesus.mapper.idMap.idToRoom["plain001"] == nil)
+
+  icesus.mapper.onRoomInfo(roominfo("road0002",
+    { coords = {11,20,0}, terrain = "road", exits = { west = "road0001" } }))
+  local idA = icesus.mapper.idMap.idToRoom["road0001"]
+  local idB = icesus.mapper.idMap.idToRoom["road0002"]
+  check("adjacent road tiles link forward", rooms[idB].exits.west == idA)
+  check("adjacent road tiles link back (grid symmetry)",
+        rooms[idA].exits.east == idB)
+
+  icesus.settings.outworldMode = "off"
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("plain002",
+    { coords = {12,20,0}, terrain = "forest" }))
+  check("off mode adds no outworld tile", (calls.addRoom or 0) == 0)
+  calls = {}
+  icesus.mapper.onRoomInfo(rA)                 -- mapped before the switch
+  check("off mode still recenters on mapped tiles",
+        (calls.centerview or 0) == 1 and (calls.setRoomName or 0) == 0)
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("inn00001"))   -- indoor, no coords
+  check("off mode still maps indoor zones", (calls.addRoom or 0) >= 1)
+
+  calls = {}
+  icesus.mapper.outworldCommand("roads")
+  check("mapper outworld roads persists",
+        (calls.table_save or 0) == 1 and icesus.settings.outworldMode == "roads")
+  SETTINGS_ON_DISK = { outworldMode = "off" }
+  icesus.loadSettings()
+  check("outworld mode loads from disk", icesus.settings.outworldMode == "off")
+  SETTINGS_ON_DISK = { outworldMode = "bogus" }
+  icesus.loadSettings()
+  check("bogus outworld mode falls back to full",
+        icesus.settings.outworldMode == "full")
+  SETTINGS_ON_DISK = nil
+end
+
+do
   -- Wipe guard: when the in-memory map has been emptied out from
   -- under a non-empty idmap (a load that came out broken), flushSave
   -- must refuse to overwrite the good on-disk snapshot.
