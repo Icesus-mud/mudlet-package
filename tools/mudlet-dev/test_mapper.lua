@@ -703,8 +703,19 @@ do
     MOCK_TIME = MOCK_TIME + 60
     icesus.mapper.saveCommand()
   end
-  check("rotation caps the history at 5 pairs", backups() == 5,
+  check("rotation keeps 5 recent pairs + the day's first", backups() == 6,
         "backups=" .. backups())
+
+  -- Day rollover: one forced backup per day for 9 days. Retention
+  -- must converge to the 5 most recent pairs plus the first pair of
+  -- each of the last 7 days (which coincide here), and prune the
+  -- older days' pairs including day 0's protected first.
+  for _ = 1, 9 do
+    MOCK_TIME = MOCK_TIME + 86400
+    icesus.mapper.saveCommand()
+  end
+  check("daily retention keeps the last 7 days' first pairs",
+        backups() == 7, "backups=" .. backups())
 end
 
 do

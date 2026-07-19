@@ -1583,7 +1583,8 @@ end
 -- except the first flush of a session and an explicit `mapper save`,
 -- which always snapshot.
 -- =============================================================
-local BACKUP_KEEP         = 5
+local BACKUP_KEEP         = 5     -- most-recent pairs, whatever their age
+local BACKUP_DAILY_DAYS   = 7     -- plus the first pair of each of these days
 local BACKUP_SPACING_SECS = 3600
 
 -- Backup pairs on disk, oldest first. Pair = same stamp on both
@@ -1618,10 +1619,35 @@ local function makeBackup(force)
   if copyFile(mapDataPath(), base .. ".map.dat")
      and copyFile(idMapPath(), base .. ".idmap.lua") then
     icesus.mapper.lastBackup = now
+    -- Tiered retention. A busy session (session-start backup + a few
+    -- explicit saves) can burn through a recent-N quota in under an
+    -- hour and rotate away the last backup that predates a problem —
+    -- exactly when it's needed most. So beyond the BACKUP_KEEP most
+    -- recent pairs, the FIRST pair of each of the last
+    -- BACKUP_DAILY_DAYS days is protected too: however hectic today
+    -- gets, yesterday's opening state survives.
     local stamps = listBackups()
-    for i = 1, #stamps - BACKUP_KEEP do
-      pcall(os.remove, backupDir() .. "/" .. stamps[i] .. ".map.dat")
-      pcall(os.remove, backupDir() .. "/" .. stamps[i] .. ".idmap.lua")
+    local protect = {}
+    for i = math.max(1, #stamps - BACKUP_KEEP + 1), #stamps do
+      protect[stamps[i]] = true
+    end
+    local firstOfDay, days = {}, {}
+    for _, s in ipairs(stamps) do
+      local day = s:match("^(%d+)%-")
+      if day and not firstOfDay[day] then
+        firstOfDay[day] = s
+        days[#days + 1] = day
+      end
+    end
+    table.sort(days)
+    for i = math.max(1, #days - BACKUP_DAILY_DAYS + 1), #days do
+      protect[firstOfDay[days[i]]] = true
+    end
+    for _, s in ipairs(stamps) do
+      if not protect[s] then
+        pcall(os.remove, backupDir() .. "/" .. s .. ".map.dat")
+        pcall(os.remove, backupDir() .. "/" .. s .. ".idmap.lua")
+      end
     end
   else
     -- a half-written pair is worse than none

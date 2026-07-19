@@ -162,8 +162,10 @@ pair** (Mudlet's own map backups don't cover the idmap, and one file
 is useless without the other) in `<profile>/Icesus.backup/`. A pair
 is snapshotted on the first save of each session, then at most once
 an hour, and every time you run `mapper save` explicitly — so an
-explicit save doubles as a manual restore point. The five most
-recent pairs are kept.
+explicit save doubles as a manual restore point. Retention is
+tiered: the five most recent pairs are kept, plus the first pair of
+each of the last seven days — so however many backups a hectic
+session burns through, yesterday's opening state always survives.
 
 ```
 mapper restore      (list available backup pairs)
