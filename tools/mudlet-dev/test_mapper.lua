@@ -72,6 +72,7 @@ mud.addRoom = function(id)
   return true
 end
 mud.roomExists  = function(id) return rooms[id] ~= nil end
+mud.getRoomArea = function(id) return rooms[id] and rooms[id].area or -1 end
 mud.getRoomName = function(id) return rooms[id] and (rooms[id].name or "") or nil end
 mud.setRoomName = function(id, n) bump("setRoomName"); if rooms[id] then rooms[id].name = n end end
 mud.setRoomArea = function(id, a) bump("setRoomArea"); if rooms[id] then rooms[id].area = a end end
@@ -927,6 +928,31 @@ do
   check("bogus outworld mode falls back to full",
         icesus.settings.outworldMode == "full")
   SETTINGS_ON_DISK = nil
+end
+
+do
+  -- Arriving (in roads/off mode) on a room that predates area
+  -- inheritance — still sitting in Default Area — must repair its
+  -- area before centering, or the whole view flips to Default Area.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.loadSettings()
+  icesus.settings.outworldMode = "roads"
+  icesus.mapper.onRoomInfo(roominfo("road0009",
+    { coords = {5,5,0}, terrain = "road" }))
+  local m = icesus.mapper.idMap
+  local strayId = m.next_id
+  m.next_id = strayId + 1
+  mud.addRoom(strayId)                     -- old-era stray: no area set
+  m.idToRoom["plainold"] = strayId
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("plainold",
+    { coords = {6,5,0}, terrain = "plains", exits = { west = "road0009" } }))
+  check("stray room's area repaired before centering",
+        rooms[strayId].area == 1)
+  check("stray visit recenters on the room", (calls.centerview or 0) == 1)
+  check("stray tile is not rebuilt (roads mode still skips it)",
+        (calls.setExit or 0) == 0)
 end
 
 do

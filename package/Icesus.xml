@@ -1885,6 +1885,19 @@ function icesus.mapper.onRoomInfo(r)
     if owMode == "off" or (roadsOnly and outworldBulk(r)) then
       local known = m.idToRoom[hexId]
       if known and (not roomExists or roomExists(known)) then
+        -- Repair strays before centering: a room pre-created before
+        -- area inheritance existed may still sit in Default Area,
+        -- and centerview on it flips the whole mapper view there.
+        if r.area and r.area ~= "" and getRoomArea then
+          local okA, aid = pcall(getRoomArea, known)
+          if okA and (not aid or aid <= 0) then
+            local realArea = ensureArea(tostring(r.area))
+            if realArea and realArea > 0 then
+              pcall(setRoomArea, known, realArea)
+              icesus.mapper.noteDirty()
+            end
+          end
+        end
         if centerview then pcall(centerview, known) end
         icesus.mapper.lastHexId = hexId
       else
