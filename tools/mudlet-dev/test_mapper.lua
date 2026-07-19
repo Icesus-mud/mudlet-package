@@ -717,7 +717,10 @@ do
   icesus.mapper.onRoomInfo(roominfo("res00002"))
   icesus.mapper.saveCommand()                  -- generation 2: both rooms
 
+  calls = {}
   icesus.mapper.restoreCommand("1")            -- newest first
+  check("restore empties the engine before loading",
+        (calls.deleteRoom or 0) >= 2)
   check("restore 1 reloads the newest idmap",
         icesus.mapper.idMap.idToRoom["res00002"] ~= nil)
   check("restore quarantines the replaced pair",
@@ -793,6 +796,28 @@ do
   icesus.mapper.install()
   check("clean install leaves no sentinel",
         not fileExists(HOME .. "/Icesus.map.loading"))
+end
+
+do
+  -- Wipe guard: when the in-memory map has been emptied out from
+  -- under a non-empty idmap (a load that came out broken), flushSave
+  -- must refuse to overwrite the good on-disk snapshot.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("wip00001"))
+  icesus.mapper.flushSave()
+  local good = readAll(HOME .. "/Icesus.map.dat")
+  icesus.mapper.onRoomInfo(roominfo("wip00002"))
+  rooms = {}                                   -- engine wiped under us
+  calls = {}
+  icesus.mapper.flushSave()
+  check("wiped engine: save refused", (calls.saveMap or 0) == 0)
+  check("wiped engine: good file untouched",
+        readAll(HOME .. "/Icesus.map.dat") == good)
+  check("wiped engine: warning shown", (calls.cecho or 0) == 1)
+  check("wiped engine: dirty flag kept", icesus.mapper.dirty == true)
+  icesus.mapper.flushSave()
+  check("wiped engine: warning not repeated", (calls.cecho or 0) == 1)
 end
 
 do

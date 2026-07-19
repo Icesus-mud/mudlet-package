@@ -1656,6 +1656,26 @@ local function fmtStamp(stamp)
   return string.format("%s-%s-%s %s:%s", y, mo, d, h, mi)
 end
 
+-- True when the engine already carries our rooms. Mudlet auto-loads
+-- the profile's own copy of the map before any script runs, and
+-- calling loadMap() on top of a populated map makes the engine tear
+-- down and rebuild every room one at a time — on a 10k-room map
+-- that's minutes of frozen UI at login, which reads exactly like
+-- "Mudlet crashes when I connect" (and got players deleting their
+-- map files to get back in). Sample a few idmap entries; any hit
+-- means the auto-loaded map is ours and the .dat reload is redundant.
+local function mapAlreadyLive(m)
+  if not (m and roomExists) then return false end
+  local sampled, present = 0, 0
+  for _, rid in pairs(m.idToRoom or {}) do
+    sampled = sampled + 1
+    local ok, hit = pcall(roomExists, rid)
+    if ok and hit then present = present + 1 end
+    if sampled >= 5 then break end
+  end
+  return present > 0
+end
+
 -- Resolve a server hex_id to a Mudlet integer roomID, creating the
 -- room with addRoom() the first time we see it. Pre-creating
 -- destination rooms before the player walks there lets Mudlet's
@@ -1928,6 +1948,26 @@ end
 
 function icesus.mapper.flushSave(forceBackup)
   if not icesus.mapper.dirty then return end
+  local m = icesus.mapper.idMap
+  if m and next(m.idToRoom or {}) and not mapAlreadyLive(m) then
+    -- The idmap says we've mapped rooms, but none of the sampled ones
+    -- exist in the engine: the in-memory map has been wiped out from
+    -- under us (a load that came out empty, an external delete).
+    -- Saving now would overwrite the good snapshot on disk with an
+    -- empty shell — the exact way players actually lost their maps.
+    -- Refuse, and say so once instead of once per poll.
+    if not icesus.mapper.wipeWarned then
+      icesus.mapper.wipeWarned = true
+      cecho("\n<red>Icesus<reset> map save blocked \226\128\148 the "
+        .. "in-memory map looks wiped (mapped rooms missing from "
+        .. "Mudlet). Saving would overwrite your good map file with an "
+        .. "empty one. Restart the profile, or roll back with "
+        .. "<yellow>mapper restore<reset>; <yellow>mapper reset<reset> "
+        .. "if you really want to start over.\n")
+    end
+    return
+  end
+  icesus.mapper.wipeWarned = nil
   local mapOk = saveMapAtomic()
   local idOk  = saveIdMap()
   if not (mapOk and idOk) then
@@ -2042,13 +2082,25 @@ function icesus.mapper.restoreCommand(arg)
       .. "the profile folder.\n")
     return
   end
-  -- Reload the restored pair in place of the in-memory state. This is
-  -- the one place a load over a populated map is unavoidable, and the
-  -- per-room teardown can freeze Mudlet for a while on a big map —
-  -- warn so the player doesn't force-quit halfway through.
+  -- Reload the restored pair in place of the in-memory state. Warn
+  -- first: on a big map the rebuild takes a while and a force-quit
+  -- halfway through is how load problems turn into data loss.
   cecho("\n<yellow>Icesus<reset> restoring \226\128\148 rebuilding the "
     .. "in-memory map. Mudlet may freeze for a bit on a large map; "
     .. "let it finish.\n")
+  -- Empty the engine of the current rooms before loading the backup.
+  -- Restoring straight over a populated map makes every room in the
+  -- .dat collide with a live one; the engine burns minutes tearing
+  -- each collision down and (on some builds) comes out the other side
+  -- with a broken, empty map. Deleting through our own idToRoom first
+  -- (same approach as reset()) hands loadMap an empty room DB — the
+  -- fast path, and the one that actually works.
+  local old = icesus.mapper.idMap
+  if old and deleteRoom then
+    for _, rid in pairs(old.idToRoom or {}) do
+      pcall(deleteRoom, rid)
+    end
+  end
   icesus.mapper.idMap = nil
   if loadMap and io.exists and io.exists(mapDataPath()) then
     pcall(loadMap, mapDataPath())
@@ -2223,26 +2275,6 @@ function icesus.mapper.reset(silent)
   end
 end
 
--- True when the engine already carries our rooms. Mudlet auto-loads
--- the profile's own copy of the map before any script runs, and
--- calling loadMap() on top of a populated map makes the engine tear
--- down and rebuild every room one at a time — on a 10k-room map
--- that's minutes of frozen UI at login, which reads exactly like
--- "Mudlet crashes when I connect" (and got players deleting their
--- map files to get back in). Sample a few idmap entries; any hit
--- means the auto-loaded map is ours and the .dat reload is redundant.
-local function mapAlreadyLive(m)
-  if not (m and roomExists) then return false end
-  local sampled, present = 0, 0
-  for _, rid in pairs(m.idToRoom or {}) do
-    sampled = sampled + 1
-    local ok, hit = pcall(roomExists, rid)
-    if ok and hit then present = present + 1 end
-    if sampled >= 5 then break end
-  end
-  return present > 0
-end
-
 -- Detect a stale idMap: idToRoom references rooms that Mudlet no longer
 -- knows about (e.g. player deleted the map via Mudlet's UI). Without
 -- this check, addRoom() short-circuits forever because every hexId
@@ -2317,7 +2349,12 @@ function icesus.mapper.install()
     if not skipLoad and idMapIsStale(m) then
       cecho("\n<yellow>Icesus<reset> mapper detected a wiped Mudlet map "
         .. "\226\128\148 clearing stale room IDs so the next room you "
-        .. "enter starts a fresh map.\n")
+        .. "enter starts a fresh map. The old files were set aside as "
+        .. ".bad-* in the profile folder.\n")
+      -- Quarantine before the reset so the automatic path never
+      -- destroys data — reset()'s os.remove then finds nothing.
+      -- Only the player's explicit `mapper reset` truly deletes.
+      quarantineLivePair()
       icesus.mapper.reset(true)
     end
   end
