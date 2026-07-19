@@ -1812,6 +1812,38 @@ local function ensureArea(name)
   return areaId or -1
 end
 
+-- "You are here" cursor for outworld tiles the mapping mode skips.
+-- One reusable room, kept out of idToRoom, moved to the player's
+-- grid coordinates and centered — so the map keeps tracking the ride
+-- across unmapped terrain instead of freezing on the last real room.
+local function moveCursor(m, r)
+  if not addRoom or type(r.coords) ~= "table" then return end
+  local x = tonumber(r.coords[1])
+  local y = tonumber(r.coords[2])
+  local z = tonumber(r.coords[3] or 0) or 0
+  if not (x and y) then return end
+  local cur = m.cursorRoom
+  if not (cur and (not roomExists or roomExists(cur))) then
+    cur = nil
+    for _ = 1, 32 do
+      local id = m.next_id
+      m.next_id = id + 1
+      if addRoom(id) ~= false then cur = id; break end
+    end
+    if not cur then return end
+    m.cursorRoom = cur
+    if setRoomChar then pcall(setRoomChar, cur, "@") end
+    icesus.mapper.noteDirty()   -- persist cursorRoom so it's reused
+  end
+  if r.area and r.area ~= "" then
+    local areaId = ensureArea(tostring(r.area))
+    if areaId and areaId > 0 then pcall(setRoomArea, cur, areaId) end
+  end
+  if r.name then pcall(setRoomName, cur, tostring(r.name)) end
+  pcall(setRoomCoordinates, cur, x, -y, z)
+  if centerview then pcall(centerview, cur) end
+end
+
 -- Signature of everything onRoomInfo consumes from a Room.Info
 -- payload (name, area, sorted exits, coords, terrain). Lets us tell
 -- "walked back into a room we already mapped, unchanged" apart from
@@ -1857,6 +1889,7 @@ function icesus.mapper.onRoomInfo(r)
         icesus.mapper.lastHexId = hexId
       else
         icesus.mapper.lastHexId = nil   -- don't anchor buildings to a ghost
+        moveCursor(m, r)                -- keep the view on the player
       end
       return
     end
@@ -2228,6 +2261,7 @@ function icesus.mapper.restoreCommand(arg)
     for _, rid in pairs(old.idToRoom or {}) do
       pcall(deleteRoom, rid)
     end
+    if old.cursorRoom then pcall(deleteRoom, old.cursorRoom) end
   end
   icesus.mapper.idMap = nil
   if loadMap and io.exists and io.exists(mapDataPath()) then
@@ -2296,6 +2330,13 @@ function icesus.mapper.outworldCommand(arg)
     icesus.settings = icesus.settings or {}
     icesus.settings.outworldMode = arg
     icesus.saveSettings()
+    -- Back to full: every tile maps again, so the position cursor
+    -- has no job left — drop it rather than leave a stray '@' cell.
+    if arg == "full" and icesus.mapper.idMap then
+      local cur = icesus.mapper.idMap.cursorRoom
+      if cur and deleteRoom then pcall(deleteRoom, cur) end
+      icesus.mapper.idMap.cursorRoom = nil
+    end
     local desc = {
       full  = "every tile is mapped (the default)",
       roads = "roads, paths, gates and points of interest are added "
@@ -2412,6 +2453,9 @@ function icesus.mapper.reset(silent)
   if icesus.mapper.idMap and deleteRoom then
     for _, rid in pairs(icesus.mapper.idMap.idToRoom or {}) do
       pcall(deleteRoom, rid)
+    end
+    if icesus.mapper.idMap.cursorRoom then
+      pcall(deleteRoom, icesus.mapper.idMap.cursorRoom)
     end
   end
   if os.remove then pcall(os.remove, mapDataPath()) end

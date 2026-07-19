@@ -204,7 +204,10 @@ mapper outworld off      (add no outworld tiles at all)
 
 Indoor zones always map normally. The modes only gate *new* tiles:
 anything already mapped stays on the map and the view still recenters
-on it as you ride. In `roads` mode neighbouring tiles are no longer
+on it as you ride. On tiles the mode skips, a single reusable `@`
+cursor cell tracks your position on the map instead — the view
+follows you across unmapped terrain without adding rooms, and the
+cursor disappears when you switch back to `full`. In `roads` mode neighbouring tiles are no longer
 pre-created (that 8-per-tile fan-out is most of the map's bulk), and
 adjacent road tiles link both ways as you ride them.
 

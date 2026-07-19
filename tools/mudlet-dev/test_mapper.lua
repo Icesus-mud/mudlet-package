@@ -830,8 +830,16 @@ do
   calls = {}
   icesus.mapper.onRoomInfo(roominfo("plain001",
     { coords = {10,21,0}, terrain = "plains", exits = { south = "road0001" } }))
-  check("roads mode skips a plains tile", (calls.addRoom or 0) == 0
-        and icesus.mapper.idMap.idToRoom["plain001"] == nil)
+  check("roads mode skips a plains tile",
+        icesus.mapper.idMap.idToRoom["plain001"] == nil)
+  local curId = icesus.mapper.idMap.cursorRoom
+  check("skipped tile spawns the position cursor",
+        curId ~= nil and rooms[curId] ~= nil and rooms[curId].char == "@")
+  check("cursor sits at the tile's grid coords",
+        rooms[curId].coords ~= nil and rooms[curId].coords[1] == 10
+        and rooms[curId].coords[2] == -21)
+  check("cursor recenters the view on the skipped tile",
+        (calls.centerview or 0) == 1)
 
   icesus.mapper.onRoomInfo(roominfo("road0002",
     { coords = {11,20,0}, terrain = "road", exits = { west = "road0001" } }))
@@ -873,6 +881,10 @@ do
     { coords = {17,20,0}, terrain = "plains", exits = { west = "cave0001" } }))
   check("roads mode still skips plain bulk terrain",
         icesus.mapper.idMap.idToRoom["plainzz1"] == nil)
+  check("cursor is reused, not duplicated",
+        (calls.addRoom or 0) == 0 and icesus.mapper.idMap.cursorRoom == curId)
+  check("cursor follows to the new tile",
+        rooms[curId].coords[1] == 17 and rooms[curId].coords[2] == -20)
 
   icesus.settings.outworldMode = "off"
   calls = {}
@@ -891,6 +903,9 @@ do
   icesus.mapper.outworldCommand("roads")
   check("mapper outworld roads persists",
         (calls.table_save or 0) == 1 and icesus.settings.outworldMode == "roads")
+  icesus.mapper.outworldCommand("full")
+  check("switching back to full removes the cursor",
+        icesus.mapper.idMap.cursorRoom == nil and rooms[curId] == nil)
   SETTINGS_ON_DISK = { outworldMode = "off" }
   icesus.loadSettings()
   check("outworld mode loads from disk", icesus.settings.outworldMode == "off")
