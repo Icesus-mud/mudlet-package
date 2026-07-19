@@ -2032,8 +2032,16 @@ function icesus.mapper.onRoomInfo(r)
           -- the rest.
           local linkable = destHash and (not roadsOnly or m.idToRoom[destHash])
           if linkable then
-            local destId = ensureRoom(destHash)
+            local destId, destNew = ensureRoom(destHash)
             pcall(setExit, roomId, destId, dir)
+            -- Give a freshly pre-created neighbour the current room's
+            -- area right away (its own visit corrects it if it's
+            -- actually across a border). Without this, the whole
+            -- unvisited frontier collects in Mudlet's "Default Area"
+            -- as a ghost outline of the explored map.
+            if destNew and areaId and areaId > 0 then
+              pcall(setRoomArea, destId, areaId)
+            end
             if roadsOnly and DIR_OPPOSITE[dir] then
               pcall(setExit, destId, roomId, DIR_OPPOSITE[dir])
             end
@@ -2060,8 +2068,11 @@ function icesus.mapper.onRoomInfo(r)
         else
           liveSpecials[dir] = true
           if destHash and (not roadsOnly or m.idToRoom[destHash]) then
-            local destId = ensureRoom(destHash)
+            local destId, destNew = ensureRoom(destHash)
             pcall(setSpecialExit, roomId, destId, dir)
+            if destNew and areaId and areaId > 0 then
+              pcall(setRoomArea, destId, areaId)
+            end
           end
           -- Special exits with unknown destinations can't be
           -- represented in Mudlet without a real target — skip.
@@ -2093,7 +2104,11 @@ function icesus.mapper.onRoomInfo(r)
             local destHash = exits[cmd]
             if destHash and destHash ~= "0"
                and (not roadsOnly or m.idToRoom[destHash]) then
-              pcall(setSpecialExit, roomId, ensureRoom(destHash), cmd)
+              local destId, destNew = ensureRoom(destHash)
+              pcall(setSpecialExit, roomId, destId, cmd)
+              if destNew and areaId and areaId > 0 then
+                pcall(setRoomArea, destId, areaId)
+              end
             end
           end
         end

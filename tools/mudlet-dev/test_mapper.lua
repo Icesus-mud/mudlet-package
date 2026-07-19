@@ -810,6 +810,19 @@ do
 end
 
 do
+  -- Pre-created neighbours must inherit the current room's area
+  -- immediately — created on sight but visited later (or never),
+  -- they otherwise collect in Mudlet's "Default Area" and draw a
+  -- ghost outline of the explored map there.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("area0001", { exits = { north = "area0002" } }))
+  local idB = icesus.mapper.idMap.idToRoom["area0002"]
+  check("pre-created neighbour inherits the current area",
+        idB ~= nil and rooms[idB].area == 1)
+end
+
+do
   -- Outworld thinning: `mapper outworld roads|off` caps the giant
   -- gridmode area that dominates map size.
   local icesus = load_icesus()
