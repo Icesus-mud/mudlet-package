@@ -931,15 +931,14 @@ do
 end
 
 do
-  -- Arriving (in roads/off mode) on a room that predates area
+  -- Off mode freezes the map: arriving on a room that predates area
   -- inheritance — still sitting in Default Area — must repair its
   -- area before centering, or the whole view flips to Default Area.
   local icesus = load_icesus()
   icesus.mapper.idMap = nil
   icesus.loadSettings()
-  icesus.settings.outworldMode = "roads"
-  icesus.mapper.onRoomInfo(roominfo("road0009",
-    { coords = {5,5,0}, terrain = "road" }))
+  icesus.settings.outworldMode = "off"
+  icesus.mapper.onRoomInfo(roominfo("seed0001"))   -- boot the idmap
   local m = icesus.mapper.idMap
   local strayId = m.next_id
   m.next_id = strayId + 1
@@ -947,12 +946,46 @@ do
   m.idToRoom["plainold"] = strayId
   calls = {}
   icesus.mapper.onRoomInfo(roominfo("plainold",
-    { coords = {6,5,0}, terrain = "plains", exits = { west = "road0009" } }))
-  check("stray room's area repaired before centering",
+    { coords = {6,5,0}, terrain = "plains" }))
+  check("off mode: stray room's area repaired before centering",
         rooms[strayId].area == 1)
-  check("stray visit recenters on the room", (calls.centerview or 0) == 1)
-  check("stray tile is not rebuilt (roads mode still skips it)",
-        (calls.setExit or 0) == 0)
+  check("off mode: stray visit recenters on the room",
+        (calls.centerview or 0) == 1)
+  check("off mode: stray room is kept (map frozen)",
+        rooms[strayId] ~= nil and (calls.deleteRoom or 0) == 0)
+end
+
+do
+  -- Roads mode self-prunes: riding over a full-mode-era bulk tile
+  -- deletes its room, so the map converges to the lean atlas.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.loadSettings()
+  icesus.settings.outworldMode = "roads"
+  icesus.mapper.onRoomInfo(roominfo("road0010",
+    { coords = {5,5,0}, terrain = "road" }))
+  local m = icesus.mapper.idMap
+  local strayId = m.next_id
+  m.next_id = strayId + 1
+  mud.addRoom(strayId)
+  m.idToRoom["plainprn"] = strayId
+  m.placed["plainprn"] = { 6, -5, 0 }
+  m.seen["plainprn"] = "old-signature"
+  icesus.mapper.dirty = false
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("plainprn",
+    { coords = {6,5,0}, terrain = "plains", exits = { west = "road0010" } }))
+  check("riding over a bulk-era room deletes it",
+        (calls.deleteRoom or 0) == 1 and rooms[strayId] == nil)
+  check("pruned room forgotten by the idmap",
+        m.idToRoom["plainprn"] == nil and m.seen["plainprn"] == nil
+        and m.placed["plainprn"] == nil)
+  check("cursor takes over the view on the pruned tile",
+        m.cursorRoom ~= nil and rooms[m.cursorRoom] ~= nil
+        and (calls.centerview or 0) >= 1)
+  check("prune marks the map dirty", icesus.mapper.dirty == true)
+  check("kept road tile is untouched",
+        rooms[m.idToRoom["road0010"]] ~= nil)
 end
 
 do

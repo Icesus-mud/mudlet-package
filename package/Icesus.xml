@@ -1884,7 +1884,23 @@ function icesus.mapper.onRoomInfo(r)
   if isOutworld and owMode ~= "full" then
     if owMode == "off" or (roadsOnly and outworldBulk(r)) then
       local known = m.idToRoom[hexId]
-      if known and (not roomExists or roomExists(known)) then
+      local live = known and (not roomExists or roomExists(known))
+      if live and roadsOnly then
+        -- Roads mode self-prunes: this tile wouldn't be mapped today
+        -- (bulk terrain), so riding over its full-mode-era room
+        -- deletes it and the map converges to the lean atlas. Center
+        -- the cursor FIRST so the player-room pointer never dangles
+        -- on the deleted room (the centerview segfault documented at
+        -- reset()).
+        icesus.mapper.lastHexId = nil
+        moveCursor(m, r)
+        if deleteRoom then pcall(deleteRoom, known) end
+        m.idToRoom[hexId] = nil
+        m.placed[hexId]   = nil
+        if m.seen then m.seen[hexId] = nil end
+        icesus.mapper.noteDirty()
+      elseif live then
+        -- off mode: the map is frozen — nothing is added or removed.
         -- Repair strays before centering: a room pre-created before
         -- area inheritance existed may still sit in Default Area,
         -- and centerview on it flips the whole mapper view there.
@@ -2369,7 +2385,8 @@ function icesus.mapper.outworldCommand(arg)
       full  = "every tile is mapped (the default)",
       roads = "roads, paths, gates and points of interest are added "
               .. "\226\128\148 a lean ridable atlas; bulk terrain "
-              .. "(forest, plains, water\226\128\166) is ignored",
+              .. "(forest, plains, water\226\128\166) is ignored, and "
+              .. "bulk tiles you ride over are pruned from the map",
       off   = "no new outworld tiles are added; indoor zones still map",
     }
     cecho(string.format("\n<lime_green>Icesus<reset> outworld mapping "

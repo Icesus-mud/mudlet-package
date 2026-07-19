@@ -202,12 +202,16 @@ mapper outworld roads    (roads, gates and landmarks: a lean atlas)
 mapper outworld off      (add no outworld tiles at all)
 ```
 
-Indoor zones always map normally. The modes only gate *new* tiles:
-anything already mapped stays on the map and the view still recenters
-on it as you ride. On tiles the mode skips, a single reusable `@`
-cursor cell tracks your position on the map instead — the view
+Indoor zones always map normally. On tiles the mode skips, a single
+reusable `@` cursor cell tracks your position on the map — the view
 follows you across unmapped terrain without adding rooms, and the
-cursor disappears when you switch back to `full`. In `roads` mode neighbouring tiles are no longer
+cursor disappears when you switch back to `full`.
+
+The two lean modes treat existing tiles differently. `roads` is
+self-pruning: riding over a bulk-terrain tile mapped back in `full`
+mode deletes its room, so a formerly-full map converges to the lean
+atlas along the routes you actually ride — no reset needed. `off`
+freezes the map instead: nothing is added and nothing is removed. In `roads` mode neighbouring tiles are no longer
 pre-created (that 8-per-tile fan-out is most of the map's bulk), and
 adjacent road tiles link both ways as you ride them.
 
