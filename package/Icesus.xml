@@ -2088,12 +2088,14 @@ function icesus.mapper.onRoomInfo(r)
           if linkable then
             local destId, destNew = ensureRoom(destHash)
             pcall(setExit, roomId, destId, dir)
-            -- Give a freshly pre-created neighbour the current room's
-            -- area right away (its own visit corrects it if it's
-            -- actually across a border). Without this, the whole
+            -- Outworld only: give a freshly pre-created tile the
+            -- current area right away (its own visit corrects it if
+            -- it's actually across a border). Without this, the whole
             -- unvisited frontier collects in Mudlet's "Default Area"
-            -- as a ghost outline of the explored map.
-            if destNew and areaId and areaId > 0 then
+            -- as a ghost outline of the explored map. Indoor zones
+            -- keep the historical behaviour — unvisited neighbours
+            -- stay out of the drawn area until actually entered.
+            if destNew and isOutworld and areaId and areaId > 0 then
               pcall(setRoomArea, destId, areaId)
             end
             if roadsOnly and DIR_OPPOSITE[dir] then
@@ -2124,7 +2126,7 @@ function icesus.mapper.onRoomInfo(r)
           if destHash and (not roadsOnly or m.idToRoom[destHash]) then
             local destId, destNew = ensureRoom(destHash)
             pcall(setSpecialExit, roomId, destId, dir)
-            if destNew and areaId and areaId > 0 then
+            if destNew and isOutworld and areaId and areaId > 0 then
               pcall(setRoomArea, destId, areaId)
             end
           end
@@ -2160,7 +2162,7 @@ function icesus.mapper.onRoomInfo(r)
                and (not roadsOnly or m.idToRoom[destHash]) then
               local destId, destNew = ensureRoom(destHash)
               pcall(setSpecialExit, roomId, destId, cmd)
-              if destNew and areaId and areaId > 0 then
+              if destNew and isOutworld and areaId and areaId > 0 then
                 pcall(setRoomArea, destId, areaId)
               end
             end

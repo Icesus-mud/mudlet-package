@@ -811,16 +811,27 @@ do
 end
 
 do
-  -- Pre-created neighbours must inherit the current room's area
-  -- immediately — created on sight but visited later (or never),
-  -- they otherwise collect in Mudlet's "Default Area" and draw a
-  -- ghost outline of the explored map there.
+  -- Outworld pre-created neighbours must inherit the current room's
+  -- area immediately — created on sight but visited later (or
+  -- never), they otherwise collect in Mudlet's "Default Area" and
+  -- draw a ghost outline of the explored map there. Indoor zones
+  -- keep the historical behaviour: neighbours are created for exit
+  -- links but stay OUT of the drawn area until actually visited.
   local icesus = load_icesus()
   icesus.mapper.idMap = nil
-  icesus.mapper.onRoomInfo(roominfo("area0001", { exits = { north = "area0002" } }))
-  local idB = icesus.mapper.idMap.idToRoom["area0002"]
-  check("pre-created neighbour inherits the current area",
+  icesus.mapper.onRoomInfo(roominfo("owar0001",
+    { coords = {5,5,0}, terrain = "plains", exits = { north = "owar0002" } }))
+  local idB = icesus.mapper.idMap.idToRoom["owar0002"]
+  check("outworld pre-created neighbour inherits the current area",
         idB ~= nil and rooms[idB].area == 1)
+
+  icesus.mapper.onRoomInfo(roominfo("area0001", { exits = { north = "area0002" } }))
+  local idD = icesus.mapper.idMap.idToRoom["area0002"]
+  check("indoor pre-created neighbour is linkable but stays unareaed",
+        idD ~= nil and (rooms[idD].area or -1) <= 0)
+  icesus.mapper.onRoomInfo(roominfo("area0002", { exits = { south = "area0001" } }))
+  check("indoor neighbour gets its area on first actual visit",
+        (rooms[idD].area or -1) > 0)
 end
 
 do
