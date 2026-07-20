@@ -1986,12 +1986,18 @@ function icesus.mapper.onRoomInfo(r)
 
   -- A room the neighbours couldn't link to before now exists — forget
   -- their signatures so their next visit rebuilds and wires the way
-  -- in. Matters most in roads mode, where neighbours aren't
-  -- pre-created and the late arrival would otherwise stay unlinked
-  -- behind their fast-path forever.
+  -- in. Exception: cardinal neighbours in roads mode. There the
+  -- DIR_OPPOSITE back-link below wires their return exit right now,
+  -- so their fast-path stays valid — invalidating them anyway forced
+  -- a full rebuild of every tile on the next ride, and a road only
+  -- went quiet after being ridden in BOTH directions. Special exits
+  -- can't be back-linked from this side: those still invalidate.
   if createdNow and type(r.exits) == "table" and m.seen then
-    for _, dest in pairs(r.exits) do
-      if type(dest) == "string" then m.seen[dest] = nil end
+    for dir, dest in pairs(r.exits) do
+      if type(dest) == "string"
+         and not (roadsOnly and CARDINALS[dir] and DIR_OPPOSITE[dir]) then
+        m.seen[dest] = nil
+      end
     end
   end
 

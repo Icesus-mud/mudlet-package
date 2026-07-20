@@ -877,6 +877,21 @@ do
   check("adjacent road tiles link back (grid symmetry)",
         rooms[idA].exits.east == idB)
 
+  -- One ride must be enough: the back-link above already wired A's
+  -- return exit, so A's fast-path signature must have survived B's
+  -- creation. Riding the road again (either direction) has to be
+  -- write-free — not a second full rebuild per tile.
+  calls = {}
+  icesus.mapper.dirty = false
+  icesus.mapper.onRoomInfo(rA)
+  check("road ridden once is quiet on the next pass (no writes)",
+        (calls.setRoomName or 0) == 0 and (calls.setExit or 0) == 0,
+        "setRoomName=" .. (calls.setRoomName or 0)
+        .. " setExit=" .. (calls.setExit or 0))
+  check("quiet pass leaves the dirty flag untouched",
+        icesus.mapper.dirty == false)
+  icesus.mapper.dirty = true              -- restore for the rest of the block
+
   -- Special tiles must survive roads mode: unknown codes (city gates
   -- 'c', points of interest '?'), missing terrain, and bulk terrain
   -- that carries a special exit.
