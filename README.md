@@ -176,17 +176,25 @@ A restore is never destructive: the pair it replaces is set aside as
 `.bad-<timestamp>` files in the profile directory.
 
 The map load itself is guarded twice. First, the package no longer
-reloads its map file when Mudlet has already auto-loaded the profile
-map at startup (the normal case): reloading a `.dat` over thousands
-of live rooms makes the engine tear them down one at a time, which
+reloads its map file when Mudlet has already auto-loaded the same map
+at startup (the normal case): reloading a `.dat` over thousands of
+live rooms makes the engine tear them down one at a time, which
 freezes Mudlet for minutes at login and looks exactly like a crash —
 this was the "Mudlet crashes when I connect and only deleting the
-map files fixes it" bug. Second, a crash-loop sentinel detects that
-the previous session died while the map was loading; when that
-happens the map file is skipped for one session so you can get back
-into the game, your files stay untouched on disk, and the console
-tells you — walk on to rebuild as you go, or `mapper restore` if the
-file itself is at fault. No more deleting map files by hand.
+map files fixes it" bug. Mudlet keeps its own copy of the map and
+writes it on its own schedule, so after a hard crash that copy can be
+older than `Icesus.map.dat`; the package counts how much of the map
+is actually there before accepting it, and reloads from its own file
+if rooms are missing rather than quietly dropping them.
+
+Second, a crash-loop sentinel detects that the previous session died
+while the map was loading; when that happens the map file is skipped
+for one session so you can get back into the game, and the console
+tells you. If Mudlet's own map came up fine you simply carry on. If
+it didn't, the map and ID table are set aside as `.bad-*` files and
+you start with a clean slate — walk on to rebuild as you go, or
+`mapper restore` to roll back to a backup. Nothing is deleted either
+way, and no more deleting map files by hand.
 
 ### Outworld mapping modes
 
@@ -213,22 +221,26 @@ stop the map from growing. `roads` additionally prunes *Default
 Area strays* (ghost rooms pre-created by older versions, never
 assigned an area) as you ride over them, so the leftover outline
 cleans itself up along your routes. `off` is a strict freeze:
-nothing is added and nothing is removed. In `roads` mode neighbouring tiles are no longer
-pre-created (that 8-per-tile fan-out is most of the map's bulk), and
-adjacent road tiles link both ways as you ride them.
+nothing is added and nothing is removed. In `roads` mode neighbouring
+tiles are no longer pre-created — that 8-per-tile fan-out is most of
+the map's bulk. Exits are only ever drawn from the room whose data
+the server just sent, so a road links up fully once you have ridden
+it in both directions.
 
-What `roads` keeps is defined by exclusion, on purpose: only the six
-bulk-fill terrains (forest, plains, water, swamp, mountain, ice) with
-nothing but plain cardinal exits are skipped. Roads and paths, city
-gates (`c`), points of interest (`?`), tiles with unknown terrain
-codes, and any tile with a special exit (it leads somewhere) are all
-kept — so landmark tiles survive even when the server labels them
-with codes this package has never seen. Unknown short codes are also
-drawn as the room glyph, mirroring the game's own overhead map. To shrink an
-already-large map, pick a mode and then `mapper reset` to rebuild
-lean from scratch — on a big map the reset itself can freeze Mudlet
-for a minute or two; let it finish. The setting persists across
-sessions and survives `mapper reset`.
+What `roads` keeps is defined by exclusion, on purpose: only the
+recognised bulk-fill terrains (forest, plains, water, swamp,
+mountain, ice, badlands, ashlands) with nothing but plain cardinal
+exits are skipped. Roads and paths, mine entrances (`?`), province
+and city buildings (`c`, `O`), tiles with unknown terrain codes, and
+any tile with a
+special exit (it leads somewhere) are all kept — so landmark tiles
+survive even when the server labels them with codes this package has
+never seen. Unknown short codes are also drawn as the room glyph,
+mirroring the game's own overhead map. To shrink an already-large
+map, pick a mode and then `mapper reset` to rebuild lean from
+scratch — on a big map the reset itself can freeze Mudlet for a
+minute or two; let it finish. The setting persists across sessions
+and survives `mapper reset`.
 
 ### Pausing the mapper
 

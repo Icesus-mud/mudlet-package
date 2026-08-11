@@ -776,34 +776,55 @@ end
 do
   -- Crash sentinel: a leftover Icesus.map.loading at install means the
   -- previous session died inside loadMap. Boot WITHOUT loading the
-  -- map, leave the files alone, and tell the player.
+  -- map and tell the player. What happens to the idmap depends on
+  -- whether the engine came up with a map of its own — the two cases
+  -- are asserted separately below.
   local icesus = load_icesus()
   icesus.mapper.idMap = nil
   icesus.mapper.onRoomInfo(roominfo("sen00001"))
   icesus.mapper.flushSave()                    -- live pair + backup exist
   local live = readAll(HOME .. "/Icesus.map.dat")
+  local engine = {}
+  for id, r in pairs(rooms) do engine[id] = r end
 
+  -- Case 1: Mudlet's own auto-loaded map is intact. Only the .dat load
+  -- was skipped, so nothing else needs to change.
   local f = io.open(HOME .. "/Icesus.map.loading", "w")
   f:write("loading"); f:close()
-  rooms = {}                                   -- engine came up empty
   icesus.mapper.idMap = nil                    -- simulate a fresh boot
   calls = {}
   icesus.mapper.install()
   check("crash recovery announces itself", (calls.cecho or 0) >= 1)
   check("recovery boot does not reload the map file",
         (calls.loadMap or 0) == 0)
-  check("live pair left untouched",
+  check("recovery with a live engine map leaves the pair untouched",
         readAll(HOME .. "/Icesus.map.dat") == live
         and countGlob("map.dat.bad-") == 0)
-  check("idmap still loaded on the recovery boot",
+  check("recovery with a live engine map keeps the idmap",
         icesus.mapper.idMap.idToRoom["sen00001"] ~= nil)
-  check("recovery boot does not reset the stale-looking idmap",
-        next(icesus.mapper.idMap.idToRoom) ~= nil
-        and fileExists(HOME .. "/Icesus.idmap.lua"))
   check("sentinel removed after recovery",
         not fileExists(HOME .. "/Icesus.map.loading"))
 
-  icesus.mapper.idMap = nil                    -- normal boot afterwards
+  -- Case 2: the engine came up empty too. Now the idmap points at
+  -- nothing, and keeping it would leave flushSave's wipe guard
+  -- refusing every save for the rest of the session — see the
+  -- regression block "recovery boot must leave the map writable".
+  -- Quarantine the pair and start clean instead.
+  f = io.open(HOME .. "/Icesus.map.loading", "w")
+  f:write("loading"); f:close()
+  rooms = {}
+  icesus.mapper.idMap = nil
+  calls = {}
+  icesus.mapper.install()
+  check("recovery with an empty engine clears the orphaned idmap",
+        next(icesus.mapper.idMap.idToRoom) == nil)
+  check("recovery with an empty engine quarantines rather than deletes",
+        countGlob("map.dat.bad-") == 1 and countGlob("idmap.lua.bad-") == 1)
+  check("quarantined map still holds the good bytes",
+        readAll(HOME .. "/Icesus.map.dat") == nil)
+
+  rooms = engine                               -- normal boot afterwards
+  icesus.mapper.idMap = nil
   calls = {}
   icesus.mapper.install()
   check("clean install leaves no sentinel",
@@ -874,17 +895,27 @@ do
   local idA = icesus.mapper.idMap.idToRoom["road0001"]
   local idB = icesus.mapper.idMap.idToRoom["road0002"]
   check("adjacent road tiles link forward", rooms[idB].exits.west == idA)
-  check("adjacent road tiles link back (grid symmetry)",
+  -- No reverse exit is written from here. B declaring `west` says
+  -- nothing about A declaring `east`; only A's own Room.Info does.
+  -- See the one-way-river regression block below.
+  check("B's creation does not invent A's return exit",
+        rooms[idA].exits.east == nil)
+
+  -- Instead, B's creation invalidates A's signature, so A's next visit
+  -- rebuilds and wires its own east exit from its own payload.
+  calls = {}
+  icesus.mapper.onRoomInfo(rA)
+  check("A rebuilds after its neighbour appears",
+        (calls.setRoomName or 0) == 1)
+  check("A's rebuild wires the return exit from A's own payload",
         rooms[idA].exits.east == idB)
 
-  -- One ride must be enough: the back-link above already wired A's
-  -- return exit, so A's fast-path signature must have survived B's
-  -- creation. Riding the road again (either direction) has to be
-  -- write-free — not a second full rebuild per tile.
+  -- And then it goes quiet: nothing new was created on that pass, so
+  -- the third ride hits the fast path and writes nothing.
   calls = {}
   icesus.mapper.dirty = false
   icesus.mapper.onRoomInfo(rA)
-  check("road ridden once is quiet on the next pass (no writes)",
+  check("road goes quiet once both ends have been ridden",
         (calls.setRoomName or 0) == 0 and (calls.setExit or 0) == 0,
         "setRoomName=" .. (calls.setRoomName or 0)
         .. " setExit=" .. (calls.setExit or 0))
@@ -1066,6 +1097,196 @@ do
   check("corrupt idmap triggers a warning", (calls.cecho or 0) >= 1)
   check("mapper still maps after a corrupt idmap",
         icesus.mapper.idMap.idToRoom["cor00001"] ~= nil)
+end
+
+-- ================================================================
+-- Regressions found reviewing the map-integrity work. Each of these
+-- reproduces a way the new guards could still lose a map.
+-- ================================================================
+
+do
+  -- The engine holding SOME of our rooms does not mean it holds the
+  -- same generation as Icesus.map.dat. Mudlet writes its own copy of
+  -- the map when the profile closes; the package writes to an
+  -- explicit path that never touches that copy. Kill Mudlet and the
+  -- auto-loaded map is whatever the last clean close left behind,
+  -- while the .dat has everything mapped since. Accepting the older
+  -- one drops those rooms and then writes the shortfall back over the
+  -- good file on the next flush.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  for i = 1, 40 do
+    icesus.mapper.onRoomInfo(roominfo(string.format("gen%05d", i)))
+  end
+  icesus.mapper.flushSave()
+  local closeSnapshot = {}                  -- Mudlet's own copy, at close
+  for id, r in pairs(rooms) do closeSnapshot[id] = r end
+
+  for i = 41, 80 do                          -- mapped after that close
+    icesus.mapper.onRoomInfo(roominfo(string.format("gen%05d", i)))
+  end
+  icesus.mapper.flushSave()                  -- .dat now knows 80 rooms
+
+  rooms = closeSnapshot                      -- crash: engine auto-loads 40
+  icesus.mapper.idMap = nil
+  calls = {}
+  icesus.mapper.install()
+  check("stale engine map is reloaded from the .dat",
+        (calls.loadMap or 0) == 1, "loadMap=" .. (calls.loadMap or 0))
+  check("stale engine map is torn down before the load, not on top of",
+        (calls.deleteRoom or 0) >= 40, "deleteRoom=" .. (calls.deleteRoom or 0))
+  check("stale engine map warns the player about the freeze",
+        (calls.cecho or 0) >= 1)
+end
+
+do
+  -- The matching negatives for the staleness check. An engine holding
+  -- the current generation must not pay for a reload at every login,
+  -- and a room deleted in Mudlet's map editor (issue #7) is normal
+  -- wear, not a stale map — hence the tolerance rather than an exact
+  -- match.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  for i = 1, 40 do
+    icesus.mapper.onRoomInfo(roominfo(string.format("cur%05d", i)))
+  end
+  icesus.mapper.flushSave()
+
+  icesus.mapper.idMap = nil                  -- reboot, engine intact
+  calls = {}
+  icesus.mapper.install()
+  check("current engine map is accepted without a reload",
+        (calls.loadMap or 0) == 0)
+
+  local victim = next(rooms)
+  rooms[victim] = nil                        -- deleted in the map editor
+  icesus.mapper.idMap = nil
+  calls = {}
+  icesus.mapper.install()
+  check("a single editor-deleted room does not force a reload",
+        (calls.loadMap or 0) == 0)
+end
+
+do
+  -- Recovery boot must leave the map writable. The sentinel path skips
+  -- the map load and tells the player to walk on and rebuild; if the
+  -- orphaned idmap survives that boot, flushSave's wipe guard sees a
+  -- mapped-but-missing room set and refuses every save for the rest of
+  -- the session. The player maps a whole session into nothing.
+  -- 200 rooms, of which the player re-walks two. flushSave's wipe
+  -- guard samples five idmap entries, so the map has to be big enough
+  -- that a couple of rebuilt rooms cannot accidentally satisfy it —
+  -- otherwise this passes for the wrong reason.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  for i = 1, 200 do
+    icesus.mapper.onRoomInfo(roominfo(string.format("wlk%05d", i)))
+  end
+  icesus.mapper.flushSave()
+
+  local function backupPairs()
+    local p = io.popen("ls '" .. HOME .. "/Icesus.backup' 2>/dev/null | grep -c 'map.dat$'")
+    local n = tonumber(p:read("*a")) or 0
+    p:close()
+    return n
+  end
+  local before = backupPairs()
+
+  MOCK_TIME = MOCK_TIME + 90                 -- new stamp, not an overwrite
+  local f = io.open(HOME .. "/Icesus.map.loading", "w")
+  f:write("loading"); f:close()
+  rooms = {}                                 -- engine came up empty too
+  icesus.mapper.idMap = nil
+  calls = {}
+  icesus.mapper.install()
+  check("recovery boot skips the map load", (calls.loadMap or 0) == 0)
+  -- A recovery boot neither loads the .dat nor checks the engine map
+  -- against it, so the session runs on whatever Mudlet auto-loaded and
+  -- flushes that over the file at the end. Forcing a snapshot first
+  -- keeps the pre-recovery map one `mapper restore` away — and it has
+  -- to ignore the hourly spacing, or the boot right after a save takes
+  -- no snapshot at all.
+  check("recovery boot snapshots the pair before touching anything",
+        backupPairs() == before + 1,
+        "backup pairs " .. before .. " -> " .. backupPairs())
+
+  for i = 1, 2 do                            -- player walks on, as told
+    icesus.mapper.onRoomInfo(roominfo(string.format("wlk%05d", i)))
+  end
+  check("walking after recovery marks the map dirty",
+        icesus.mapper.dirty == true)
+  calls = {}
+  icesus.mapper.flushSave()
+  check("map rebuilt after recovery actually persists",
+        icesus.mapper.dirty == false and (calls.saveMap or 0) >= 1,
+        "dirty=" .. tostring(icesus.mapper.dirty)
+        .. " saveMap=" .. (calls.saveMap or 0))
+  check("recovery did not destroy the old pair",
+        countGlob("map.dat.bad-") == 1)
+end
+
+do
+  -- The outworld grid is not reliably symmetric: ~2.7% of sampled
+  -- links are one-way (ride into a river tile and the current keeps
+  -- you from stepping back out). Writing a reverse exit on a
+  -- neighbour because this room has a forward one invents a link the
+  -- game does not have, and the fast path then keeps it forever.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.loadSettings()
+  icesus.settings.outworldMode = "roads"
+
+  -- B: a river tile, mapped back in full mode, with no way west.
+  local B = roominfo("owB00001", { coords = {1,0,0}, terrain = "road",
+                                   exits = { east = "owC00001" } })
+  icesus.mapper.onRoomInfo(B)
+  local bid = icesus.mapper.idMap.idToRoom["owB00001"]
+  check("one-way: neighbour starts with no return exit",
+        bid ~= nil and (rooms[bid].exits or {}).west == nil)
+
+  -- A: ride in from the west. A can go east into B; B still can't
+  -- come back.
+  icesus.mapper.onRoomInfo(roominfo("owA00001",
+    { coords = {0,0,0}, terrain = "road", exits = { east = "owB00001" } }))
+  check("one-way: no reverse exit is invented on the neighbour",
+        (rooms[bid].exits or {}).west == nil,
+        "B.west=" .. tostring((rooms[bid].exits or {}).west))
+
+  -- And B's own next Room.Info stays authoritative about B's exits.
+  icesus.mapper.onRoomInfo(B)
+  check("one-way: neighbour's own payload still governs its exits",
+        (rooms[bid].exits or {}).west == nil)
+end
+
+do
+  -- Roads mode has to recognise every walkable bulk fill the server
+  -- can name, or it keeps the terrain it exists to drop. Badlands
+  -- (17.3k tiles) and ashlands (6.1k) used to arrive with no terrain
+  -- field at all, which the "unknown means interesting" rule keeps.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.loadSettings()
+  icesus.settings.outworldMode = "roads"
+  icesus.mapper.onRoomInfo(roominfo("seed0001",
+    { coords = {0,0,0}, terrain = "road", exits = { east = "bad00001" } }))
+
+  for _, t in ipairs({ "badlands", "ashlands" }) do
+    local id = "bulk_" .. t
+    icesus.mapper.onRoomInfo(roominfo(id,
+      { coords = {5,5,0}, terrain = t, exits = { north = "seed0001" } }))
+    check("roads mode skips " .. t,
+          icesus.mapper.idMap.idToRoom[id] == nil)
+  end
+
+  -- The landmark glyphs that share the "not a known bulk fill" rule
+  -- must still be kept.
+  for _, t in ipairs({ "c", "?" }) do
+    local id = "mark_" .. t
+    icesus.mapper.onRoomInfo(roominfo(id,
+      { coords = {6,6,0}, terrain = t, exits = { north = "seed0001" } }))
+    check("roads mode keeps landmark terrain '" .. t .. "'",
+          icesus.mapper.idMap.idToRoom[id] ~= nil)
+  end
 end
 
 print(string.format("\n%d/%d checks passed, %d failed", total - failures, total, failures))

@@ -1394,25 +1394,24 @@ local DIR_OFFSET = {
   ["in"]    = { 0,  0, 0 }, out       = { 0,  0, 0 },
 }
 
--- Used by roads-mode outworld linking: the grid is geometrically
--- symmetric, so when tile B links back to already-mapped tile A we
--- can wire A -> B immediately instead of waiting for A's own rebuild.
-local DIR_OPPOSITE = {
-  north="south", south="north", east="west", west="east",
-  northeast="southwest", southwest="northeast",
-  northwest="southeast", southeast="northwest",
-  up="down", down="up", ["in"]="out", out="in",
-}
-
--- The six bulk-fill terrains — what roads mode exists to NOT map.
+-- The bulk-fill terrains — what roads mode exists to NOT map.
 -- The filter is deliberately inverted (skip these, keep everything
 -- else) so special tiles survive without us having to enumerate
--- them: city gates and points of interest ship their own codes
--- ('c', '?', …) or none at all, and an unknown code must always mean
+-- them: mine entrances ('?') and province/city buildings ('c', 'O',
+-- …) ship their own codes, and an unknown code must always mean
 -- "interesting", never "dropped".
+--
+-- Keep this list in step with gmcp_d.c::send_room_info's terrain
+-- switch. Every walkable bulk fill the server can name has to appear
+-- here or roads mode keeps it: badlands (17.3k tiles) and ashlands
+-- (6.1k) used to fall through the server's switch with no terrain
+-- field at all, which the rule below reads as "interesting" — that
+-- was ~3% of the world's land kept by a mode whose whole job is to
+-- drop it.
 local BULK_TERRAIN = {
   water=true, swamp=true, mountain=true,
   plains=true, forest=true, ice=true,
+  badlands=true, ashlands=true,
 }
 
 -- Roads-mode verdict for an outworld tile: skip only a recognised
@@ -1433,7 +1432,8 @@ end
 
 -- Terrain glyph + env mapping. Server ships r.terrain for outworld
 -- tiles as categorical names (see gmcp_d.c::send_room_info: road,
--- path, water, swamp, mountain, plains, forest, ice). We render
+-- path, water, swamp, mountain, plains, forest, ice, badlands,
+-- ashlands, or the raw map glyph for rarer landmarks). We render
 -- a glyph in the room cell for distinctive features only (water,
 -- swamp, mountain) and let env color carry the identity for the
 -- broader fills (forest, plains, ice). Indoor rooms ship no
@@ -1459,6 +1459,11 @@ local TERRAIN_ENV  = {
   plains   = 205,  -- HI_YELLOW
   forest   = 206,  -- GREEN
   ice      = 207,  -- HI_CYAN
+  badlands = 209,  -- MAGENTA
+  -- 'a' is WHITE in the classic palette, which is already the worn
+  -- track's colour — silver from the current palette instead, so ash
+  -- flats and paths don't read as the same tile.
+  ashlands = 210,  -- SILVER
 }
 
 -- Fully transparent env for the position-cursor room: the cell draws
@@ -1475,6 +1480,8 @@ local function setupTerrainEnvs()
   pcall(setCustomEnvColor, TERRAIN_ENV.plains,   255, 255,  85, 255)
   pcall(setCustomEnvColor, TERRAIN_ENV.forest,     0, 170,   0, 255)
   pcall(setCustomEnvColor, TERRAIN_ENV.ice,       85, 255, 255, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.badlands, 170,   0, 170, 255)
+  pcall(setCustomEnvColor, TERRAIN_ENV.ashlands, 192, 192, 192, 255)
   pcall(setCustomEnvColor, CURSOR_ENV,             0,   0,   0,   0)
 end
 
@@ -1749,7 +1756,9 @@ end
 -- that's minutes of frozen UI at login, which reads exactly like
 -- "Mudlet crashes when I connect" (and got players deleting their
 -- map files to get back in). Sample a few idmap entries; any hit
--- means the auto-loaded map is ours and the .dat reload is redundant.
+-- means the map in the engine is ours.
+--
+-- Identity only. "Ours" does not mean "current" — see engineCoverage.
 local function mapAlreadyLive(m)
   if not (m and roomExists) then return false end
   local sampled, present = 0, 0
@@ -1760,6 +1769,37 @@ local function mapAlreadyLive(m)
     if sampled >= 5 then break end
   end
   return present > 0
+end
+
+-- How much of the idmap has to be live before we accept the map the
+-- engine already holds as the same generation as Icesus.map.dat. Not
+-- 1.0: a room deleted in Mudlet's map editor (issue #7) is normal and
+-- must not force a full reload at every login.
+local MAP_FRESH_RATIO = 0.95
+
+-- How many of the idmap's rooms the engine actually holds.
+-- mapAlreadyLive's 5-room sample answers "is this our map?"; this
+-- answers "is it the map our idmap was saved with?" — a different
+-- question, because Mudlet writes its own copy of the map on its own
+-- schedule (profile close) while the package saves to an explicit
+-- path that never touches that copy. Kill Mudlet and the two fall out
+-- of step: the auto-loaded map can be sessions behind the .dat, and
+-- accepting it silently drops every room mapped since, then writes
+-- the shortfall back over the good file on the next flush.
+--
+-- One pass over the idmap, one roomExists each — a few ms on a 12k
+-- map, once per login.
+local function engineCoverage(m)
+  if not (m and roomExists) then return 0, 0 end
+  local known, live = 0, 0
+  local ok = pcall(function()
+    for _, rid in pairs(m.idToRoom or {}) do
+      known = known + 1
+      if roomExists(rid) then live = live + 1 end
+    end
+  end)
+  if not ok then return 0, 0 end
+  return known, live
 end
 
 -- Resolve a server hex_id to a Mudlet integer roomID, creating the
@@ -1986,16 +2026,15 @@ function icesus.mapper.onRoomInfo(r)
 
   -- A room the neighbours couldn't link to before now exists — forget
   -- their signatures so their next visit rebuilds and wires the way
-  -- in. Exception: cardinal neighbours in roads mode. There the
-  -- DIR_OPPOSITE back-link below wires their return exit right now,
-  -- so their fast-path stays valid — invalidating them anyway forced
-  -- a full rebuild of every tile on the next ride, and a road only
-  -- went quiet after being ridden in BOTH directions. Special exits
-  -- can't be back-linked from this side: those still invalidate.
+  -- in. Only the neighbour's own Room.Info can say which way that is:
+  -- the outworld grid is NOT reliably symmetric, so an exit here does
+  -- not license writing the reverse one over there (rivers carry you
+  -- in without letting you back out; ~2.7% of sampled outworld links
+  -- are one-way). Costs one rebuild pass per direction, after which
+  -- the fast path goes quiet for good.
   if createdNow and type(r.exits) == "table" and m.seen then
     for dir, dest in pairs(r.exits) do
-      if type(dest) == "string"
-         and not (roadsOnly and CARDINALS[dir] and DIR_OPPOSITE[dir]) then
+      if type(dest) == "string" then
         m.seen[dest] = nil
       end
     end
@@ -2051,14 +2090,16 @@ function icesus.mapper.onRoomInfo(r)
     m.placed[hexId] = { fx, fy, fz }
   end
 
-  -- Terrain glyph + env tint. Server only ships r.terrain for
-  -- outworld tiles with a road or path underneath; everything else
-  -- keeps Mudlet's default rendering.
+  -- Terrain glyph + env tint. Server ships r.terrain for every tile
+  -- on the main world map; indoor rooms and the six planes (which
+  -- have their own maps the server does not read here) ship none and
+  -- keep Mudlet's default rendering.
   if type(r.terrain) == "string" then
     local tc = TERRAIN_CHAR[r.terrain]
     if not tc and #r.terrain <= 2 and not TERRAIN_ENV[r.terrain] then
-      -- Unknown short code ('c' gates, '?' points of interest, legacy
-      -- single-char terrains): render it as-is, like the game's own
+      -- Unknown short code ('?' mine entrances, 'c'/'O' province and
+      -- city buildings, legacy single-char terrains): render it as-is,
+      -- like the game's own
       -- overhead map does. The length guard keeps full words like
       -- "plains" from being painted into a room cell.
       tc = r.terrain
@@ -2103,9 +2144,6 @@ function icesus.mapper.onRoomInfo(r)
             -- stay out of the drawn area until actually entered.
             if destNew and isOutworld and areaId and areaId > 0 then
               pcall(setRoomArea, destId, areaId)
-            end
-            if roadsOnly and DIR_OPPOSITE[dir] then
-              pcall(setExit, destId, roomId, DIR_OPPOSITE[dir])
             end
             -- Position unplaced destinations relative to this room so
             -- Mudlet draws a graph instead of stacking everything at
@@ -2416,7 +2454,7 @@ function icesus.mapper.outworldCommand(arg)
     end
     local desc = {
       full  = "every tile is mapped (the default)",
-      roads = "roads, paths, gates and points of interest are added "
+      roads = "roads, paths, mine entrances and buildings are added "
               .. "\226\128\148 a lean ridable atlas; bulk terrain "
               .. "(forest, plains, water\226\128\166) is ignored, and "
               .. "Default Area strays are pruned as you ride over them",
@@ -2590,23 +2628,52 @@ function icesus.mapper.install()
     if io.exists and io.exists(sentinelPath()) then
       pcall(os.remove, sentinelPath())
       skipLoad = true
+      -- Snapshot the pair before this session can touch it. A recovery
+      -- boot is the one case where we neither load the .dat nor check
+      -- it against the engine, so whatever map Mudlet auto-loaded runs
+      -- the session and gets flushed over the file at the end — and if
+      -- that copy was older, the newer one is gone. The files are still
+      -- intact right here; a forced backup makes the newer map a
+      -- `mapper restore` away no matter what happens next.
+      makeBackup(true)
       cecho("\n<red>Icesus<reset> the last session died while loading "
         .. "the map, so the map file was skipped this session to let "
-        .. "you back in. Your saved files are untouched; "
-        .. "<yellow>mapper restore<reset> lists backups if the map "
-        .. "itself is at fault.\n")
+        .. "you back in. <yellow>mapper restore<reset> lists backups "
+        .. "if the map file itself is at fault.\n")
     end
     icesus.mapper.idMap = loadIdMap()
     local m = icesus.mapper.idMap
-    -- Only load the .dat when the engine doesn't already hold our
-    -- rooms (see mapAlreadyLive — reloading over a populated map
-    -- freezes Mudlet for minutes on big maps). Also skip on a fresh
-    -- profile: Mudlet logs a noisy "Unable to open map file for
-    -- reading" + debug dump when the file is missing, and pcall
-    -- doesn't suppress it (the message is emitted from Mudlet C++,
-    -- not raised as a Lua error).
-    if not skipLoad and not mapAlreadyLive(m)
-       and loadMap and io.exists and io.exists(mapDataPath()) then
+    -- Skip the .dat when the engine already holds the same generation
+    -- of our map (reloading over a populated map freezes Mudlet for
+    -- minutes on big maps). Also skip on a fresh profile: Mudlet logs
+    -- a noisy "Unable to open map file for reading" + debug dump when
+    -- the file is missing, and pcall doesn't suppress it (the message
+    -- is emitted from Mudlet C++, not raised as a Lua error).
+    local doLoad = not skipLoad and loadMap
+                   and io.exists and io.exists(mapDataPath())
+    if doLoad then
+      local known, live = engineCoverage(m)
+      if known > 0 and live >= known * MAP_FRESH_RATIO then
+        doLoad = false                    -- same generation, nothing to do
+      elseif live > 0 then
+        -- Ours, but short: Mudlet auto-loaded an older copy of the map
+        -- than the .dat the idmap was saved with. Loading straight on
+        -- top would make the engine tear every colliding room down one
+        -- at a time; clear our own rooms first, the way restore does,
+        -- and warn, because on a big map this is the slow path.
+        cecho(string.format(
+          "\n<yellow>Icesus<reset> the map Mudlet loaded is behind your "
+          .. "saved one (%d of %d rooms) \226\128\148 reloading from "
+          .. "<yellow>Icesus.map.dat<reset>. Mudlet may freeze for a bit "
+          .. "on a large map; let it finish.\n", live, known))
+        if deleteRoom then
+          for _, rid in pairs(m.idToRoom or {}) do pcall(deleteRoom, rid) end
+          if m.cursorRoom then pcall(deleteRoom, m.cursorRoom) end
+        end
+        m.cursorRoom = nil
+      end
+    end
+    if doLoad then
       local sf = io.open(sentinelPath(), "w")
       if sf then sf:write("loading") sf:close() end
       pcall(loadMap, mapDataPath())
@@ -2621,14 +2688,21 @@ function icesus.mapper.install()
       end
       pcall(os.remove, sentinelPath())
     end
-    -- Stale detection stays out of the sentinel-recovery path: with
-    -- the map deliberately not loaded, "no sampled room exists" is
-    -- expected, not proof the idmap is orphaned.
-    if not skipLoad and idMapIsStale(m) then
+    -- Stale detection also runs on the sentinel-recovery path. It has
+    -- to: with the map deliberately not loaded AND the engine empty,
+    -- the idmap really is orphaned for this session, and keeping it
+    -- would leave flushSave's wipe guard refusing every save until the
+    -- player restarts — a whole session of walking, mapped and thrown
+    -- away, while the console told them to walk on and rebuild.
+    -- Quarantining hands them a writable slate and keeps the old pair
+    -- (plus every backup) for `mapper restore`. If the engine did come
+    -- up with our rooms, idMapIsStale is false and nothing happens.
+    if idMapIsStale(m) then
       cecho("\n<yellow>Icesus<reset> mapper detected a wiped Mudlet map "
         .. "\226\128\148 clearing stale room IDs so the next room you "
         .. "enter starts a fresh map. The old files were set aside as "
-        .. ".bad-* in the profile folder.\n")
+        .. ".bad-* in the profile folder, and <yellow>mapper "
+        .. "restore<reset> lists your backups.\n")
       -- Quarantine before the reset so the automatic path never
       -- destroys data — reset()'s os.remove then finds nothing.
       -- Only the player's explicit `mapper reset` truly deletes.
