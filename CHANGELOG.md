@@ -1,5 +1,102 @@
 # Changelog
 
+## v1.0.16 — 2026-08-11
+
+- **The "Mudlet crashes when I connect" bug, and the map loss behind
+  it.** Closing Mudlet cleanly and reconnecting could end with the
+  client apparently hung at login, and the only way back in was
+  deleting `Icesus.map.dat` and `Icesus.idmap.lua` — losing the whole
+  map. Neither file was ever corrupt. Mudlet auto-loads the profile's
+  own map before any script runs, and the package then called
+  `loadMap()` on top of it; on a 12.7k-room map that reload froze the
+  UI for minutes. Players force-quit the unresponsive window, and the
+  broken empty map got saved over the good one. The package now checks
+  whether the engine already holds its rooms and skips the redundant
+  reload, which removes the freeze entirely. (Diagnosis and fix by
+  Steve De Jongh / sdejongh / Arthr, PR #10.)
+
+- **`mapper outworld full|roads|off`.** The outworld grid is where a
+  map gets big: on a mature map it is 95%+ of the rooms, all in one
+  gridmode area, which is also what makes engine-side map operations
+  slow. `roads` keeps the road and path network plus landmarks and
+  stops pre-creating the 8-neighbour fan-out around every tile;
+  `off` adds no outworld tiles at all. Indoor zones always map
+  normally. On a skipped tile an invisible cursor cell keeps the view
+  tracking your position, so riding across unmapped terrain still
+  follows you. The setting persists and survives `mapper reset`.
+  (Arthr, PR #10.)
+
+- **Both map files are now written atomically, backed up as a pair,
+  and restorable.** Each save goes to a sidecar, is validated, and is
+  renamed over the live file, so a crash mid-save cannot truncate
+  anything. Map and ID table are snapshotted together in
+  `Icesus.backup/` — Mudlet's own map backups cannot recover a thing
+  without the ID table that names those rooms — on the first save of a
+  session, hourly after that, and on every explicit `mapper save`.
+  Retention keeps the five most recent pairs plus the first pair of
+  each of the last seven days, so a hectic session cannot rotate away
+  the last known-good state. `mapper restore` lists them and rolls
+  back. A save is also refused outright if the in-memory map looks
+  wiped, which is the exact write that used to destroy maps, and the
+  stale-map auto-reset now sets the old pair aside as `.bad-*` instead
+  of deleting it. Only an explicit `mapper reset` still deletes.
+  (Arthr, PR #10.)
+
+- **The map Mudlet already has is now checked, not assumed.** Mudlet
+  writes its own copy of the map when the profile closes, while the
+  package writes on its own cadence, so a hard crash leaves the
+  auto-loaded map behind `Icesus.map.dat`. Sampling a few rooms only
+  proves that map is *ours*, not that it is current. The package now
+  counts how much of the ID table is actually live and reloads from
+  its own file when the engine is short, instead of silently running a
+  session on an older map and then writing that shortfall back over
+  the good file. A single room deleted in Mudlet's map editor is
+  normal wear and does not trigger a reload.
+
+- **A recovery boot leaves the map writable.** When the crash sentinel
+  fires, the map file is skipped for one session and the console tells
+  you to walk on and rebuild. If the engine also came up empty, the
+  orphaned ID table used to make every save refuse for the rest of the
+  session, so that whole session of mapping went nowhere. The pair is
+  now snapshotted and set aside, and you get a clean slate that
+  actually saves. `mapper restore` still has the old map.
+
+- **`roads` mode no longer invents exits.** Linking a neighbour's
+  return exit because this room has a forward one assumes the outworld
+  grid is symmetric, and it is not: ride into a river tile and the
+  current stops you stepping back out. Roughly 2.7% of sampled
+  outworld links are one-way, and the unchanged-room fast path kept
+  the invented exit forever, so Mudlet's pathfinder would route
+  through a door the game does not have. A road now links up fully
+  once you have ridden it in both directions.
+
+- **Badlands and ashlands are recognised as bulk terrain.** They are
+  walkable fill, about 23k tiles between them, and used to reach the
+  client with no terrain name at all, which the "unknown means
+  interesting" rule reads as a landmark worth keeping. `roads` mode
+  was keeping about 3% of the world's land it exists to drop. Needs
+  the matching server change, which is already live.
+
+- **Exits that pointed at rooms which do not exist are fixed
+  server-side.** Some areas write exit destinations in a form the room
+  itself never uses — no leading slash, a doubled separator, or a
+  trailing `.c` — and the server hashed that raw string into the room
+  id it sent you. The id never matched the room you actually walked
+  into, so the mapper drew a phantom next door and then drew the real
+  room separately. Shanty Town was the worst of it and was effectively
+  unmappable. The server now hashes the canonical path, so the ids
+  agree. Note that phantoms already sitting in your saved map will not
+  clean themselves up; they simply stop being created. Delete them in
+  Mudlet's map editor, or `mapper reset` and rewalk. (Reported by
+  Chosig, mudlet-package#3.)
+
+- **Pre-created outworld neighbours inherit the current area** instead
+  of collecting in Mudlet's "Default Area" as a ghost outline of
+  everywhere you have been, and arriving on an older stray repairs it
+  rather than flipping the mapper view. Indoor zones keep the previous
+  behaviour. `roads` mode also prunes those strays as you ride over
+  them. (Arthr, PR #10.)
+
 ## v1.0.15 — 2026-07-04
 
 - **Manual or automatic map saving.** On a really big accumulated map
