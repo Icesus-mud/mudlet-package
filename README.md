@@ -32,9 +32,9 @@ for the same Mudlet room IDs.
 profile load and re-installs itself if a newer version is published.
 You'll see `Icesus update available: vX.Y.Z (you have vA.B.C).
 Installing…` in the main console — no action required, the new build
-slots in without a restart. To opt out, set
-`icesus.config.autoUpdate = false` in your own scripts before the
-package loads.
+slots in without a restart. Your own settings and customisations
+survive it; see [Customising](#customising). To opt out, put
+`config = { autoUpdate = false }` in `Icesus.user.lua`.
 
 The package emits a green `Icesus v1.0.x ready.` line on load.
 If you don't see vitals updating, the most likely cause is GMCP not
@@ -268,6 +268,190 @@ a fresh graph. The reset is per-profile, so different characters keep
 their own maps. Backup pairs in `Icesus.backup/` survive a reset, so
 `mapper restore` can undo one that turns out to be a mistake.
 
+## Customising
+
+A new release reinstalls the package, so anything you change inside its
+own script is gone with the next update. Two files in your Mudlet
+profile directory are yours instead — install, update, uninstall and
+`mapper reset` all leave them alone:
+
+- **`Icesus.user.lua`** — data. Colours, fonts, text sizes, which side
+  the column sits on, how much scrollback the chat panel keeps.
+- **`Icesus.custom.lua`** — script. Everything else, including
+  replacing what the package does with your own code.
+
+Both sit next to your map, in Mudlet's profile directory
+(`lua getMudletHomeDir()` prints the path).
+
+### The short version
+
+```
+hud                    what is set right now, and where it came from
+hud side left|right    move the combat and comms column
+hud font <name>        set the HUD font (hud font default to undo)
+hud chatsize <n>       channel feed text size
+hud example            write a starter Icesus.user.lua
+hud reload             re-read both files after an edit, no relog
+hud reset              forget what `hud` set; your files stay
+```
+
+Start with `hud example`. It writes an `Icesus.user.lua` with every
+setting present and commented out, so customising is a matter of
+deleting `--` and running `hud reload`. It never overwrites a file you
+already have.
+
+### Icesus.user.lua
+
+Return one table. Anything you leave out keeps the package default, and
+deleting a line later really does go back to that default.
+
+```lua
+return {
+  hudSide   = "left",
+  fontStack = '"Fira Code", "DejaVu Sans Mono", monospace',
+
+  fontSizes = { channels = 11, location = 12 },
+
+  config = {
+    borderRight  = 420,
+    channelTimes = false,
+    autoUpdate   = true,
+  },
+
+  chatStyle = {
+    channel    = "SpringGreen",
+    talker     = "khaki",
+    text       = "wheat",
+    perChannel = { newbie = "SpringGreen", sales = "grey" },
+  },
+
+  palette = {
+    ice    = "#a5f3fc",
+    hpGrad = { "#7f1d1d", "#ef4444" },
+  },
+
+  effectStyles = {
+    poisoned = { fg = "#4ade80", bg = "rgba(74,222,128,0.18)",
+                 bd = "rgba(74,222,128,0.40)" },
+  },
+}
+```
+
+| Section | Keys |
+| --- | --- |
+| top level | `hudSide` (`"left"` / `"right"`), `fontStack` |
+| `config` | `hudSide`, `autoUpdate`, `borderTop`, `borderRight`, `borderBottom`, `channelLines`, `channelTimes`, `expMaxW` |
+| `fontSizes` | `identity`, `carry`, `exp`, `location`, `mapSave`, `vitals`, `momentum`, `cast`, `badges`, `enemy`, `channels` |
+| `chatStyle` | `time`, `channel`, `tell`, `speech`, `emote`, `talker`, `selfTalker`, `text`, `perChannel` |
+| `palette` | every colour token the HUD uses — see `icesus.palette` in the script; `hpGrad`, `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` take a `{ from, to }` pair |
+| `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped |
+
+Colours are Mudlet colour names (`chatStyle`) or CSS colours
+(`palette`, `effectStyles`). `chatStyle.text = ""` leaves the server's
+own colours alone, which is the default.
+
+Get a key wrong and the package tells you which line it ignored, after
+the ready banner and again under `hud`. It never silently drops a typo.
+
+Data only in this file: no Mudlet function calls, no `if` on game
+state. That's what the other file is for.
+
+### Icesus.custom.lua
+
+A plain Lua script, run before the HUD is built, with the whole Mudlet
+API and the `icesus` table in scope. Three things it can do that the
+data file can't:
+
+**Replace what the package does.** Every GMCP handler is looked up by
+name when its event fires, so assigning over one takes effect
+immediately and survives updates — `icesus.onCommText`,
+`onCommTell`, `onRoomSpeech`, `onBase`, `onVitals`, `onMaxstats`,
+`onStatus`, `onCasting`, `onCooldowns`, `onEnemyDeath`, `onRoomInfo`.
+
+**Reshape the HUD.** Define `icesus.onHudReady()` and it runs at the
+end of every HUD build, when the widgets exist and are styled. This is
+where you move things, hide things, or add your own. Every widget is a
+Geyser object under `icesus.hud`: `banner`, `identityLabel`,
+`carryLabel`, `expGauge`, `bottom`, `hp`, `sp`, `ep`, `psp`,
+`locationLabel`, `mapSaveBadge`, `mapModeBtn`, `right`, `momentumBtn`,
+`specialMomentumBtn`, `castGauge`, `effectsRow`, `cooldownsRow`,
+`enemyLabel`, `channels`.
+
+**Change the defaults in code**, the same keys as the data file, for
+anything you want computed rather than written out.
+
+Worked example — the chat feed on the left of the main window, in your
+own colours, with the rest of the HUD where it was:
+
+```lua
+local CHAT_W = 320
+
+icesus.onHudReady = function()
+  setBorderLeft(CHAT_W)
+  if not icesus.myChat then
+    icesus.myChat = Geyser.MiniConsole:new({
+      name = "myChat",
+      x = 8, y = icesus.config.borderTop + 8,
+      width = CHAT_W - 16,
+      height = "100%-" .. (icesus.config.borderTop + 80),
+      autoWrap = true, fontSize = 11, color = "#0c0e1a",
+    })
+  end
+  icesus.myChat:show()
+  icesus.hud.channels:hide()      -- the package's own panel
+end
+
+local function mine(line)
+  if icesus.myChat then icesus.myChat:cecho(line .. "\n") end
+end
+
+icesus.onCommText = function()
+  local p = gmcp.Comm and gmcp.Comm.Channel and gmcp.Comm.Channel.Text
+  if not p then return end
+  mine(string.format("<SpringGreen>[%s]<reset> <khaki>%s<reset>: %s",
+    tostring(p.channel or "?"), tostring(p.talker or ""),
+    tostring(p.text or "")))
+end
+```
+
+If the file has an error the package says so and carries on with its
+own defaults — a broken customisation never costs you the HUD.
+
+### From a package of your own
+
+Prefer to keep your work in a Mudlet package rather than a loose file?
+The package raises `icesus.hudReady` at the end of every HUD build:
+
+```lua
+registerAnonymousEventHandler("icesus.hudReady", function()
+  setFont("icesus.channels", "Fira Code")
+  setFontSize("icesus.channels", 11)
+end)
+```
+
+That fires on the first build, on every rebuild, and after an update
+reinstalls the package, so there is nothing to re-apply by hand.
+
+### What wins
+
+Weakest to strongest:
+
+1. the package defaults
+2. what the `hud` command has saved (in `Icesus.settings.lua`)
+3. `Icesus.user.lua`
+4. `Icesus.custom.lua`
+
+So a setting written in a file beats the same setting typed as a
+command — and `hud side left` will tell you outright when
+`Icesus.user.lua` is pinning the side, rather than appearing to do
+nothing.
+
+Two honest limits. The combat and comms panels move as one column, not
+individually: `hud side` moves all of them, and pulling a single panel
+out means building your own, as in the example above. And panel order
+within the column is fixed — reordering means `move()`ing the widgets
+in `onHudReady`.
+
 ## Resetting and reinstalling
 
 If the HUD looks frozen after a link-death or a long stretch of bad
@@ -380,7 +564,10 @@ The next features in priority order, all of them welcome PRs:
    without juggling windows.
 3. **Party panel** — `Party.Info` with HP bars per member.
 4. **Sound pack** — level-up, channel mention, death, combat-enter cues.
-5. **Theme switcher** — light / dark / high-contrast.
+5. **Theme switcher** — light / dark / high-contrast. Every colour is
+   already overridable per player (see [Customising](#customising));
+   what's missing is a set of named themes and a command to switch
+   between them.
 6. **`Client.Triggers` / `Client.Hotkeys` GMCP sync** — triggers and
    hotkeys roam between the web client and Mudlet.
 7. **Inventory panel** — `Char.Items`, slot-equipped + carried.

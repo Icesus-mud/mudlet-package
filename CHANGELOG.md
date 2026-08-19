@@ -1,5 +1,63 @@
 # Changelog
 
+## v1.0.17 — 2026-08-19
+
+- **Customisation that survives an update.** Every release reinstalls
+  the package, which took any edit made inside its script with it —
+  players who had recoloured the channel feed were re-patching after
+  each update. Two files in the Mudlet profile directory are now the
+  supported place for that, and install, update, uninstall and
+  `mapper reset` all leave them alone. `Icesus.user.lua` returns a
+  table of data overrides: `hudSide`, `fontStack`, and sections for
+  `config`, `fontSizes`, `chatStyle`, `palette` and `effectStyles`.
+  `Icesus.custom.lua` is a script, run before the HUD is built, for
+  anything data can't express. A bad key in either file is reported by
+  name after the ready banner instead of silently doing nothing, and a
+  broken file never costs you the HUD. See the README's "Customising".
+
+- **`hud` command.** `hud` on its own reports what is set and which
+  file it came from; `hud side left|right` moves the combat and comms
+  column to either side of the main window; `hud font <name>` and
+  `hud chatsize <n>` cover the two most-asked tweaks without writing
+  Lua; `hud example` writes a fully commented starter
+  `Icesus.user.lua`; `hud reload` re-reads both files with no relog;
+  `hud reset` forgets what the command set and leaves the files. What
+  `hud` saves lives in `Icesus.settings.lua` alongside the map
+  settings, and loses to `Icesus.user.lua` — deliberately, and it
+  says so when that happens rather than appearing to ignore you.
+
+- **The channel feed's colours are data now.** They used to be literals
+  inside the GMCP handlers, which is why recolouring meant editing the
+  package. `chatStyle` covers the time stamp, channel tags, tells,
+  speech, emotes, talker names, your own lines, the message body, and a
+  `perChannel` map so `chat` and `sales` can differ. Per-widget font
+  sizes moved out to `fontSizes` for the same reason.
+
+- **Handlers are late-bound.** Event registration now looks each
+  handler up on the `icesus` table when the event fires instead of
+  capturing the function at install time, so assigning over
+  `icesus.onCommText` (or any other) from your own script takes effect
+  immediately, with no reinstall.
+
+- **`icesus.hudReady`.** Raised at the end of every HUD build, with an
+  `icesus.onHudReady()` callback alongside it, so tweaks that need real
+  widgets have a defined moment to run — including after an update
+  reinstalls the package. `icesus.rebuildHUD()` forces a rebuild after
+  changing anything the HUD reads.
+
+- **The HUD-rebuild guard no longer needs a sentinel bump.** It
+  compares a signature of the script version and the layout inputs, so
+  a hot upgrade, a side change or a font change all rebuild correctly
+  and a new widget can't be skipped by a forgotten constant. Rebuilt
+  HUDs also repaint immediately from cached state instead of showing
+  placeholders until the next packet.
+
+- **Auto-update opt-out works as documented.** `autoUpdate` is a real
+  config default, so `config = { autoUpdate = false }` in
+  `Icesus.user.lua` takes. The old README said to set
+  `icesus.config.autoUpdate = false` "before the package loads", which
+  could never work: the script reassigns `icesus.config` on load.
+
 ## v1.0.16 — 2026-08-11
 
 - **The "Mudlet crashes when I connect" bug, and the map loss behind

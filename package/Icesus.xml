@@ -70,6 +70,17 @@ end</script>
    <packageName>Icesus</packageName>
    <regex>^mapper outworld(?: (full|roads|off))?$</regex>
   </Alias>
+  <Alias isActive="yes" isFolder="no">
+   <name>hud</name>
+   <script>if icesus and icesus.hudCommand then
+  icesus.hudCommand(matches[2])
+else
+  cecho("\n&lt;red&gt;hud: Icesus package not loaded.&lt;reset&gt;\n")
+end</script>
+   <command></command>
+   <packageName>Icesus</packageName>
+   <regex>^hud(?:\s+(.*))?$</regex>
+  </Alias>
  </AliasPackage>
  <ActionPackage></ActionPackage>
  <ScriptPackage>
@@ -84,7 +95,7 @@ end</script>
     <packageName>Icesus</packageName>
     <script><![CDATA[
 -- Icesus Mudlet package — core
--- v1.0.8  •  https://github.com/Icesus-mud/mudlet-package
+-- https://github.com/Icesus-mud/mudlet-package
 --
 -- One Lua script defines the whole package. Everything lives under the
 -- global `icesus` table. On (re)load the previous instance is torn down
@@ -100,15 +111,26 @@ icesus = icesus or {}
 -- package info; fall back to the literal for dev hot-reload from disk
 -- (when this file isn't loaded as an installed package yet).
 icesus.version = (getPackageInfo and getPackageInfo("Icesus")
-                  and getPackageInfo("Icesus").version) or "1.0.16"
+                  and getPackageInfo("Icesus").version) or "1.0.17"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
 
 -- =============================================================
--- Config — tweak in your private session, or PR upstream defaults.
+-- Config — layout and feed defaults.
+--
+-- Don't edit these to customise: the auto-update reinstalls the whole
+-- package and takes local edits with it. Put overrides in
+-- getMudletHomeDir()/Icesus.user.lua instead — see the player
+-- customisation section below, or run `hud example` in-game.
 -- =============================================================
 icesus.config = {
+  -- Which side the combat / comms column sits on: "right" or "left".
+  hudSide      = "right",
+  -- Check GitHub for a newer release once per session and reinstall.
+  -- Turning this off means you update by hand; the package will not
+  -- tell you when it is out of date.
+  autoUpdate   = true,
   borderTop    = 92,     -- banner: identity + EXP (px)
   borderRight  = 360,    -- right column width (px)
   -- Bottom strip, top → bottom: vitals gauges (32) → exits row (28) →
@@ -152,6 +174,15 @@ function icesus.loadSettings()
     -- the road/path network, "off" adds no outworld tiles at all.
     outworldMode = (t.outworldMode == "roads" or t.outworldMode == "off")
                    and t.outworldMode or "full",
+    -- HUD preferences set by the `hud` command. nil means "leave the
+    -- script default alone"; Icesus.user.lua overrides these in turn
+    -- (see icesus.user.apply).
+    hudSide  = (t.hudSide == "left" or t.hudSide == "right")
+               and t.hudSide or nil,
+    hudFont  = (type(t.hudFont) == "string" and t.hudFont ~= "")
+               and t.hudFont or nil,
+    chatSize = (tonumber(t.chatSize) and tonumber(t.chatSize) > 0)
+               and tonumber(t.chatSize) or nil,
   }
 end
 
@@ -196,6 +227,53 @@ icesus.palette = {
 icesus.fontStack = '"JetBrains Mono", "DejaVu Sans Mono", "Courier New", monospace'
 
 -- =============================================================
+-- Font sizes — the effective size of each piece of HUD text.
+-- Qt silently ignores the CSS font-size on some Mudlet builds, so
+-- every widget also gets a setFontSize() call; these are the numbers
+-- it passes. Override per key from Icesus.user.lua.
+-- =============================================================
+icesus.fontSizes = {
+  identity  = 15,   -- banner: name + class/race/guild
+  carry     = 12,   -- banner: money / DF / weight
+  exp       = 10,   -- banner: EXP gauge text
+  location  = 13,   -- bottom strip: room + exits
+  mapSave   = 10,   -- bottom strip: map badge + mode pill
+  vitals    = 10,   -- bottom strip: HP / SP / EP / PSP gauge text
+  momentum  = 12,   -- column: momentum buttons
+  cast      = 12,   -- column: cast bar text
+  badges    = 11,   -- column: effect + cooldown rows
+  enemy     = 12,   -- column: enemy panel
+  channels  = 13,   -- column: channel feed
+}
+
+-- Effective font size for a HUD widget; `dflt` keeps the HUD legible
+-- if an override zeroed or removed the key.
+local function fsz(key, dflt)
+  local n = tonumber(icesus.fontSizes and icesus.fontSizes[key])
+  if n and n > 0 then return n end
+  return dflt
+end
+
+-- =============================================================
+-- Channel feed styling — cecho colour names for the channel panel.
+-- `perChannel` keys off the server's own channel or speech name
+-- ("chat", "sales", "newbie", "say", "shout") and wins over the
+-- generic `channel` / `speech` colours. Override from
+-- Icesus.user.lua.
+-- =============================================================
+icesus.chatStyle = {
+  time       = "grey",           -- HH:MM stamp
+  channel    = "DodgerBlue",     -- [chat], [sales], ...
+  tell       = "MediumOrchid",   -- [tell]
+  speech     = "DodgerBlue",     -- [say], [shout], [whisper]
+  emote      = "SteelBlue",      -- [emote] in the room
+  talker     = "gold",           -- who is speaking
+  selfTalker = "DimGrey",        -- your own lines
+  text       = "",               -- "" keeps the server's own colours
+  perChannel = {},               -- e.g. { newbie = "SpringGreen" }
+}
+
+-- =============================================================
 -- Effect badge styling — mirrors webclient .effect-* CSS classes.
 -- Unknown effects fall back to the neutral "default" entry.
 -- =============================================================
@@ -216,6 +294,514 @@ icesus.effectStyles = {
 local function effectStyle(name)
   local key = tostring(name or ""):lower()
   return icesus.effectStyles[key] or icesus.effectStyles.default
+end
+
+-- =============================================================
+-- Player customisation.
+--
+-- The auto-update reinstalls this package wholesale, so any edit made
+-- inside this script is lost with the next release. Overrides live in
+-- two optional files in getMudletHomeDir() instead, which install,
+-- update, uninstall and `mapper reset` never touch:
+--
+--   Icesus.user.lua    data. Returns a table of overrides for config /
+--                      palette / fontSizes / chatStyle / effectStyles,
+--                      plus hudSide and fontStack. `hud example`
+--                      writes a commented starter file.
+--   Icesus.custom.lua  script. Runs before the HUD is built, so it can
+--                      do everything the data file can, plus replace
+--                      any icesus.on* handler and define
+--                      icesus.onHudReady() for widget-level work.
+--
+-- Layering, weakest first:
+--   script defaults → `hud` command settings → Icesus.user.lua
+--   → Icesus.custom.lua
+--
+-- Prefer keeping your tweaks in a package of your own? Register for
+-- the "icesus.hudReady" event, raised at the end of every HUD build.
+-- =============================================================
+icesus.user = icesus.user or {}
+
+local DEFAULT_FONT_STACK = icesus.fontStack
+
+local function shallowCopy(t)
+  local c = {}
+  for k, v in pairs(t) do
+    if type(v) == "table" then
+      local inner = {}
+      for kk, vv in pairs(v) do inner[kk] = vv end
+      c[k] = inner
+    else
+      c[k] = v
+    end
+  end
+  return c
+end
+
+-- The overridable sections, snapshotted at script load. Re-layering
+-- (after a `hud reload`, say) restores these first, so a key deleted
+-- from Icesus.user.lua really does go back to the default instead of
+-- lingering from the previous pass.
+local SECTIONS = { "config", "palette", "fontSizes", "chatStyle",
+                   "effectStyles" }
+local DEFAULTS = {}
+for _, name in ipairs(SECTIONS) do
+  DEFAULTS[name] = shallowCopy(icesus[name])
+end
+
+local userWarnings = {}
+
+local function warnUser(fmt, ...)
+  userWarnings[#userWarnings + 1] = string.format(fmt, ...)
+end
+
+function icesus.user.dataPath()
+  return getMudletHomeDir() .. "/Icesus.user.lua"
+end
+
+function icesus.user.scriptPath()
+  return getMudletHomeDir() .. "/Icesus.custom.lua"
+end
+
+-- Load one of the player's files with our own globals visible to it,
+-- so Icesus.custom.lua can reach `icesus` and the Mudlet API. Mudlet's
+-- Lua hands a loadfile()d chunk the real global table anyway; doing it
+-- explicitly keeps the same code working under Lua 5.1 (LuaJIT, what
+-- Mudlet ships) and under a sandboxed 5.4 interpreter (the tests).
+local function loadPlayerFile(path)
+  local f = io.open(path, "r")
+  if not f then return nil, "cannot open " .. path end
+  local src = f:read("*a")
+  f:close()
+  -- 5.2+: load(chunk, name, mode, env). 5.1: load() takes a reader
+  -- function, so the call itself raises and loadstring does the work.
+  local ok, chunk, err = pcall(load, src, "@" .. path, "t", _G)
+  if ok and chunk then return chunk end
+  if ok and err then return nil, err end
+  if loadstring then
+    chunk, err = loadstring(src, "@" .. path)
+    if chunk and setfenv then setfenv(chunk, _G) end
+    return chunk, err
+  end
+  return nil, "cannot load " .. path
+end
+
+local function fileThere(path)
+  if io.exists then return io.exists(path) and true or false end
+  local f = io.open(path, "r")
+  if f then f:close(); return true end
+  return false
+end
+
+-- Copy scalar overrides onto a default table. Only keys that already
+-- exist are accepted, and only values matching the default's type — a
+-- typo should say so rather than quietly do nothing. Nested tables
+-- (gauge gradients, perChannel maps) are replaced wholesale, keeping
+-- string and number leaves.
+local function mergeScalars(label, dst, src)
+  if type(src) ~= "table" then
+    warnUser("%s: expected a table, got %s — ignored", label, type(src))
+    return
+  end
+  for k, v in pairs(src) do
+    local cur = dst[k]
+    if cur == nil then
+      warnUser("%s.%s: not a setting, ignored", label, tostring(k))
+    elseif type(v) ~= type(cur) then
+      warnUser("%s.%s: expected %s, got %s — ignored",
+        label, tostring(k), type(cur), type(v))
+    elseif type(v) == "table" then
+      local copy = {}
+      for kk, vv in pairs(v) do
+        if type(vv) == "string" or type(vv) == "number" then
+          copy[kk] = vv
+        else
+          warnUser("%s.%s.%s: expected a string, ignored",
+            label, tostring(k), tostring(kk))
+        end
+      end
+      dst[k] = copy
+    else
+      dst[k] = v
+    end
+  end
+end
+
+-- Effect badges take new keys as well as overrides: the server can
+-- start sending an effect this build has never heard of.
+local function mergeEffectStyles(src)
+  if type(src) ~= "table" then
+    warnUser("effectStyles: expected a table, got %s — ignored", type(src))
+    return
+  end
+  for name, spec in pairs(src) do
+    local key = tostring(name):lower()
+    if type(spec) ~= "table" then
+      warnUser("effectStyles.%s: expected { fg = .., bg = .., bd = .. }", key)
+    else
+      local cur = icesus.effectStyles[key] or icesus.effectStyles.default
+      icesus.effectStyles[key] = {
+        fg = type(spec.fg) == "string" and spec.fg or cur.fg,
+        bg = type(spec.bg) == "string" and spec.bg or cur.bg,
+        bd = type(spec.bd) == "string" and spec.bd or cur.bd,
+      }
+    end
+  end
+end
+
+local KNOWN_TOP = {
+  hudSide = true, fontStack = true, config = true, palette = true,
+  fontSizes = true, chatStyle = true, effectStyles = true,
+}
+
+-- Layer 1: back to the script defaults.
+function icesus.user.reset()
+  userWarnings = {}
+  icesus.fontStack = DEFAULT_FONT_STACK
+  for _, name in ipairs(SECTIONS) do
+    -- Refetched rather than captured: a custom script is allowed to
+    -- swap a whole section table out, and the reset has to land on
+    -- whichever table the rest of the package is reading.
+    local dst = icesus[name]
+    if type(dst) ~= "table" then
+      dst = {}
+      icesus[name] = dst
+    end
+    for k in pairs(dst) do dst[k] = nil end
+    for k, v in pairs(shallowCopy(DEFAULTS[name])) do dst[k] = v end
+  end
+end
+
+-- Layer 2: the handful of preferences the `hud` command persists.
+function icesus.user.applySettings()
+  local s = icesus.settings or {}
+  if s.hudSide  then icesus.config.hudSide = s.hudSide end
+  if s.hudFont  then
+    icesus.fontStack = string.format('"%s", %s', s.hudFont, DEFAULT_FONT_STACK)
+  end
+  if s.chatSize then icesus.fontSizes.channels = s.chatSize end
+end
+
+-- Layer 3: Icesus.user.lua.
+function icesus.user.loadData()
+  icesus.user.dataLoaded = false
+  local path = icesus.user.dataPath()
+  if not fileThere(path) then return end
+
+  local chunk, err = loadPlayerFile(path)
+  if not chunk then
+    warnUser("Icesus.user.lua: %s", tostring(err)); return
+  end
+  local ok, t = pcall(chunk)
+  if not ok then
+    warnUser("Icesus.user.lua: %s", tostring(t)); return
+  end
+  if type(t) ~= "table" then
+    warnUser("Icesus.user.lua: must end with `return { ... }` (got %s)",
+      type(t))
+    return
+  end
+  icesus.user.dataLoaded = true
+
+  if t.hudSide ~= nil then
+    if t.hudSide == "left" or t.hudSide == "right" then
+      icesus.config.hudSide = t.hudSide
+    else
+      warnUser('hudSide: expected "left" or "right", ignored')
+    end
+  end
+  if t.fontStack ~= nil then
+    if type(t.fontStack) == "string" then icesus.fontStack = t.fontStack
+    else warnUser("fontStack: expected a string, ignored") end
+  end
+  if t.config       then mergeScalars("config",    icesus.config,    t.config) end
+  if t.palette      then mergeScalars("palette",   icesus.palette,   t.palette) end
+  if t.fontSizes    then mergeScalars("fontSizes", icesus.fontSizes, t.fontSizes) end
+  if t.chatStyle    then mergeScalars("chatStyle", icesus.chatStyle, t.chatStyle) end
+  if t.effectStyles then mergeEffectStyles(t.effectStyles) end
+  for k in pairs(t) do
+    if not KNOWN_TOP[k] then
+      warnUser("%s: not a top-level setting, ignored", tostring(k))
+    end
+  end
+end
+
+-- Layer 4: Icesus.custom.lua. Runs with the full Mudlet API, before
+-- the HUD is built, so it can also swap out icesus.on* handlers —
+-- those are looked up by name at event time, not captured at install.
+function icesus.user.runScript()
+  icesus.user.scriptLoaded = false
+  local path = icesus.user.scriptPath()
+  if not fileThere(path) then return end
+
+  local chunk, err = loadPlayerFile(path)
+  if not chunk then
+    warnUser("Icesus.custom.lua: %s", tostring(err)); return
+  end
+  local ok, e = pcall(chunk)
+  if ok then icesus.user.scriptLoaded = true
+  else warnUser("Icesus.custom.lua: %s", tostring(e)) end
+end
+
+-- The whole stack, in order. Safe to call again at any time.
+function icesus.user.apply()
+  icesus.user.reset()
+  icesus.user.applySettings()
+  icesus.user.loadData()
+  icesus.user.runScript()
+end
+
+-- Echoed once after the ready banner rather than during load, so the
+-- login screen stays quiet and a broken override file is impossible to
+-- miss.
+function icesus.user.report()
+  if icesus.user.dataLoaded or icesus.user.scriptLoaded then
+    local which = {}
+    if icesus.user.dataLoaded   then which[#which + 1] = "Icesus.user.lua" end
+    if icesus.user.scriptLoaded then which[#which + 1] = "Icesus.custom.lua" end
+    cecho(string.format(
+      "<grey>Icesus<reset> customisation loaded from <cyan>%s<reset>.\n",
+      table.concat(which, "<reset> and <cyan>")))
+  end
+  for _, w in ipairs(userWarnings) do
+    cecho(string.format("<yellow>Icesus<reset> %s\n", w))
+  end
+  if #userWarnings > 0 then
+    cecho("<grey>Fix the file and run <yellow>hud reload<reset>"
+      .. "<grey>, or <yellow>hud<reset><grey> for the current state.<reset>\n")
+  end
+end
+
+function icesus.user.warnings()
+  return userWarnings
+end
+
+local EXAMPLE_FILE = [==[
+-- Icesus.user.lua — personal overrides for the Icesus Mudlet package.
+--
+-- This file is yours. The package's auto-update never touches it, so
+-- everything set here survives every release. Data only: return a
+-- table, don't call Mudlet functions (use Icesus.custom.lua for that).
+--
+-- Edit, then run `hud reload` in-game — no relog needed.
+-- Delete a line to go back to the package default.
+
+return {
+  -- Which side the combat / comms column sits on: "right" or "left".
+  -- hudSide = "left",
+
+  -- Font for the whole HUD. First name that exists on your system wins.
+  -- fontStack = '"Fira Code", "DejaVu Sans Mono", monospace',
+
+  -- Text sizes. Keys: identity, carry, exp, location, mapSave, vitals,
+  -- momentum, cast, badges, enemy, channels.
+  fontSizes = {
+    -- channels = 11,
+  },
+
+  -- Layout. borderTop / borderRight / borderBottom are the HUD's
+  -- reserved strips in pixels; channelLines is the chat scrollback;
+  -- channelTimes toggles the HH:MM stamp.
+  config = {
+    -- borderRight  = 420,
+    -- channelTimes = false,
+  },
+
+  -- Channel feed colours (Mudlet colour names). perChannel keys off
+  -- the channel or speech name and wins over the generic ones.
+  chatStyle = {
+    -- channel    = "SpringGreen",
+    -- talker     = "khaki",
+    -- text       = "wheat",
+    -- perChannel = { newbie = "SpringGreen", sales = "grey" },
+  },
+
+  -- HUD colours. Same token names the web client uses; *Grad keys take
+  -- a { from, to } pair.
+  palette = {
+    -- ice     = "#a5f3fc",
+    -- bgPanel = "#161a30",
+    -- hpGrad  = { "#7f1d1d", "#ef4444" },
+  },
+
+  -- Effect badge colours. fg = text, bg = fill, bd = border. New effect
+  -- names are allowed here, not just the ones the package ships with.
+  effectStyles = {
+    -- poisoned = { fg = "#4ade80", bg = "rgba(74,222,128,0.18)",
+    --              bd = "rgba(74,222,128,0.40)" },
+  },
+}
+]==]
+
+-- `hud example` — drop a commented starter file next to the settings,
+-- never over an existing one.
+function icesus.user.writeExample()
+  local path = icesus.user.dataPath()
+  if fileThere(path) then
+    cecho(string.format(
+      "\n<yellow>Icesus<reset> <cyan>%s<reset> already exists "
+      .. "\226\128\148 not overwriting it.\n", path))
+    return false
+  end
+  local f = io.open(path, "w")
+  if not f then
+    cecho(string.format(
+      "\n<red>Icesus<reset> couldn't write <cyan>%s<reset>.\n", path))
+    return false
+  end
+  f:write(EXAMPLE_FILE)
+  f:close()
+  cecho(string.format(
+    "\n<lime_green>Icesus<reset> wrote <cyan>%s<reset>.\n"
+    .. "<grey>Every setting is commented out. Uncomment what you want, "
+    .. "then run <yellow>hud reload<reset><grey>.<reset>\n", path))
+  return true
+end
+
+-- =============================================================
+-- `hud` command — the small set of tweaks worth having without
+-- writing Lua. Everything it sets is persisted in
+-- Icesus.settings.lua; Icesus.user.lua still wins over it.
+-- =============================================================
+local function hudStatus()
+  local L = icesus.hudLayout()
+  cecho("\n<cyan>Icesus HUD<reset>\n")
+  cecho(string.format("  column side   <yellow>%s<reset>\n", L.side))
+  cecho(string.format("  font          <yellow>%s<reset>\n",
+    tostring(icesus.fontStack)))
+  cecho(string.format("  chat text     <yellow>%d pt<reset>\n",
+    fsz("channels", 13)))
+  cecho(string.format("  overrides     <cyan>%s<reset> %s\n",
+    icesus.user.dataPath(),
+    icesus.user.dataLoaded and "<green>loaded<reset>" or "<grey>none<reset>"))
+  cecho(string.format("                <cyan>%s<reset> %s\n",
+    icesus.user.scriptPath(),
+    icesus.user.scriptLoaded and "<green>loaded<reset>" or "<grey>none<reset>"))
+  local w = icesus.user.warnings()
+  if #w > 0 then
+    cecho(string.format("  <yellow>%d problem%s in those files "
+      .. "\226\128\148 see below<reset>\n", #w, #w == 1 and "" or "s"))
+    for _, line in ipairs(w) do
+      cecho(string.format("    <yellow>%s<reset>\n", line))
+    end
+  end
+  cecho("<grey>  hud side left|right   move the combat/comms column\n")
+  cecho("  hud font <name>       set the HUD font\n")
+  cecho("  hud chatsize <n>      set the channel feed text size\n")
+  cecho("  hud example           write a starter Icesus.user.lua\n")
+  cecho("  hud reload            re-read the override files\n")
+  cecho("  hud reset             forget the settings above\n")
+  cecho("  Full reference: README \"Customising\".<reset>\n")
+end
+
+-- Re-layer, rebuild, then report. A setting that Icesus.user.lua pins
+-- must not be announced as applied — silently losing to a file you
+-- forgot about is the worst version of this feature.
+local function hudReapply(key, want, label, okMsg)
+  icesus.user.apply()
+  icesus.rebuildHUD()
+  local pinned = false
+  if key and want ~= nil then
+    local got
+    if key == "hudSide" then got = icesus.config.hudSide
+    elseif key == "hudFont" then got = icesus.fontStack
+    elseif key == "chatSize" then got = fsz("channels", 13) end
+    if key == "hudFont" then
+      pinned = not tostring(got):find(want, 1, true)
+    else
+      pinned = (tostring(got) ~= tostring(want))
+    end
+  end
+  if pinned then
+    cecho(string.format(
+      "\n<yellow>Icesus<reset> %s is pinned by <cyan>%s<reset> "
+      .. "\226\128\148 remove it there to use <yellow>hud %s<reset>.\n",
+      label or key, icesus.user.dataPath(), label or key))
+  elseif okMsg then
+    cecho(okMsg)
+  end
+end
+
+function icesus.hudCommand(arg)
+  icesus.settings = icesus.settings or {}
+  arg = tostring(arg or ""):gsub("^%s*(.-)%s*$", "%1")
+  local verb, rest = arg:match("^(%S+)%s*(.-)$")
+  verb = verb and verb:lower() or ""
+
+  if verb == "" then
+    hudStatus()
+
+  elseif verb == "side" then
+    local side = rest:lower()
+    if side ~= "left" and side ~= "right" then
+      cecho("\n<yellow>Icesus<reset> usage: "
+        .. "<yellow>hud side left<reset> or <yellow>hud side right<reset>\n")
+      return
+    end
+    icesus.settings.hudSide = side
+    icesus.saveSettings()
+    hudReapply("hudSide", side, "side", string.format(
+      "\n<lime_green>Icesus<reset> combat/comms column moved to the "
+      .. "<yellow>%s<reset>.\n", side))
+
+  elseif verb == "font" then
+    if rest == "" then
+      cecho("\n<yellow>Icesus<reset> usage: "
+        .. "<yellow>hud font Fira Code<reset> "
+        .. "(<yellow>hud font default<reset> to undo)\n")
+      return
+    end
+    if rest:lower() == "default" then
+      icesus.settings.hudFont = nil
+      icesus.saveSettings()
+      hudReapply(nil, nil, nil,
+        "\n<lime_green>Icesus<reset> HUD font back to the default.\n")
+      return
+    end
+    icesus.settings.hudFont = rest
+    icesus.saveSettings()
+    hudReapply("hudFont", rest, "font", string.format(
+      "\n<lime_green>Icesus<reset> HUD font set to <yellow>%s<reset>. "
+      .. "<grey>Mudlet falls back to the next font in the stack if your "
+      .. "system doesn't have it.<reset>\n", rest))
+
+  elseif verb == "chatsize" then
+    local n = tonumber(rest)
+    if not n or n < 6 or n > 30 then
+      cecho("\n<yellow>Icesus<reset> usage: "
+        .. "<yellow>hud chatsize 11<reset> (6-30)\n")
+      return
+    end
+    icesus.settings.chatSize = math.floor(n)
+    icesus.saveSettings()
+    hudReapply("chatSize", math.floor(n), "chatsize", string.format(
+      "\n<lime_green>Icesus<reset> channel feed text set to "
+      .. "<yellow>%d pt<reset>.\n", math.floor(n)))
+
+  elseif verb == "example" then
+    icesus.user.writeExample()
+
+  elseif verb == "reload" then
+    icesus.user.apply()
+    icesus.rebuildHUD()
+    cecho("\n<lime_green>Icesus<reset> override files re-read.\n")
+    icesus.user.report()
+
+  elseif verb == "reset" then
+    icesus.settings.hudSide  = nil
+    icesus.settings.hudFont  = nil
+    icesus.settings.chatSize = nil
+    icesus.saveSettings()
+    cecho("\n<lime_green>Icesus<reset> HUD settings forgotten "
+      .. "<grey>(Icesus.user.lua is untouched).<reset>\n")
+    icesus.user.apply()
+    icesus.rebuildHUD()
+
+  else
+    cecho(string.format(
+      "\n<yellow>Icesus<reset> no such HUD command: <yellow>%s<reset>. "
+      .. "Try <yellow>hud<reset> on its own.\n", verb))
+  end
 end
 
 -- =============================================================
@@ -317,29 +903,67 @@ local function lgv(top, bot)
 end
 
 -- =============================================================
+-- Layout — every side-dependent coordinate in one place, so the
+-- arithmetic behind `hud side left|right` is testable without a
+-- Mudlet UI. Widths stay percentage strings for Geyser.
+-- =============================================================
+function icesus.hudLayout()
+  local T = tonumber(icesus.config.borderTop)    or 92
+  local R = tonumber(icesus.config.borderRight)  or 360
+  local B = tonumber(icesus.config.borderBottom) or 64
+  local left = (icesus.config.hudSide == "left")
+  local BADGE_W, MODE_W, LOC_H = 140, 104, 28
+  -- The map-save controls hug the window's far right edge; with the
+  -- column parked there they stop short of it by its width.
+  local ctrlOff = left and 0 or R
+  return {
+    side    = left and "left" or "right",
+    T = T, R = R, B = B,
+    LOC_H = LOC_H, BADGE_W = BADGE_W, MODE_W = MODE_W,
+    colX    = left and 0 or ("-" .. R),      -- combat / comms column
+    colEdge = left and "border-right" or "border-left",
+    stripX  = left and R or 0,               -- vitals + location rows
+    stripW  = "100%-" .. R,
+    locW    = "100%-" .. (R + BADGE_W + MODE_W),
+    badgeX  = ctrlOff + MODE_W + BADGE_W,
+    modeX   = ctrlOff + MODE_W,
+  }
+end
+
+-- =============================================================
 -- HUD construction.
 -- =============================================================
 function icesus.setupHUD()
-  -- Self-heal a stale HUD. A hot upgrade evaluates the new script
-  -- while the previous version's widgets are still up; its teardown
-  -- runs under pcall and can die silently, leaving icesus.hud set.
-  -- Early-returning on that stale table means widgets introduced by
-  -- this version are never created — so only skip the rebuild when
-  -- the newest widget we create is actually present.
-  if icesus.hud and icesus.hud.mapSaveBadge then return end
+  local L = icesus.hudLayout()
+  -- Skip the rebuild only when the standing HUD was built by this
+  -- script version from these exact layout inputs. A hot upgrade
+  -- evaluates the new script while the previous version's widgets are
+  -- still up, and its teardown runs under pcall and can die silently —
+  -- a signature mismatch catches that, and catches a changed side or
+  -- font too, without anyone remembering to bump a sentinel.
+  local sig = table.concat({
+    icesus.version, L.side, L.T, L.R, L.B,
+    tostring(icesus.fontStack), tostring(icesus.fontSizes.channels),
+  }, "|")
+  if icesus.hud and icesus.hudSig == sig then return end
   if icesus.hud then icesus.teardownHUD() end
   icesus.hud = {}
+  icesus.hudSig = sig
 
   local P  = icesus.palette
   local FS = icesus.fontStack
 
-  local T = icesus.config.borderTop
-  local R = icesus.config.borderRight
-  local B = icesus.config.borderBottom
+  local T, R, B = L.T, L.R, L.B
 
   setBorderTop(T)
-  setBorderRight(R)
   setBorderBottom(B)
+  if L.side == "left" then
+    setBorderLeft(R)
+    setBorderRight(0)
+  else
+    setBorderRight(R)
+    setBorderLeft(0)
+  end
 
   -- =====================================================================
   -- TOP BANNER — full-window strip above the main console.
@@ -384,7 +1008,7 @@ function icesus.setupHUD()
   ]], P.text, FS))
   -- CSS font-size is silently ignored by Qt on some Mudlet builds.
   -- Geyser's setFontSize goes through QFont and always takes.
-  pcall(function() icesus.hud.identityLabel:setFontSize(15) end)
+  pcall(function() icesus.hud.identityLabel:setFontSize(fsz("identity", 15)) end)
 
   -- Carry summary (right half of banner row 1).
   icesus.hud.carryLabel = Geyser.Label:new({
@@ -399,7 +1023,7 @@ function icesus.setupHUD()
     qproperty-alignment: 'AlignRight | AlignVCenter';
     padding: 0;
   ]], P.textDim, FS))
-  pcall(function() icesus.hud.carryLabel:setFontSize(12) end)
+  pcall(function() icesus.hud.carryLabel:setFontSize(fsz("carry", 12)) end)
 
   -- EXP gauge (banner row 2). Geyser.Gauge with forest gradient.
   -- Cap width on widescreens so the centred label stays near the eye.
@@ -435,7 +1059,7 @@ function icesus.setupHUD()
     font-weight: 600;
     qproperty-alignment: 'AlignCenter';
   ]], P.textBright, FS))
-  pcall(function() icesus.hud.expGauge.text:setFontSize(10) end)
+  pcall(function() icesus.hud.expGauge.text:setFontSize(fsz("exp", 10)) end)
   icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
 
   -- =====================================================================
@@ -453,8 +1077,8 @@ function icesus.setupHUD()
   -- Vitals row at the TOP of the bottom border (closest to the console).
   icesus.hud.bottom = Geyser.HBox:new({
     name = "icesus.bottom",
-    x = 0, y = "-" .. B,
-    width = "100%-" .. R,
+    x = L.stripX, y = "-" .. B,
+    width = L.stripW,
     height = VITALS_H,
   })
 
@@ -462,12 +1086,12 @@ function icesus.setupHUD()
   -- Mudlet's command field). Its right end is reserved for the two
   -- map-save controls (unsaved badge + mode pill) — separate Labels
   -- because Qt's HTML-in-QLabel has no per-element click targets.
-  local BADGE_W = 140
-  local MODE_W  = 104
+  local BADGE_W = L.BADGE_W
+  local MODE_W  = L.MODE_W
   icesus.hud.locationLabel = Geyser.Label:new({
     name = "icesus.locationLabel",
-    x = 0, y = "-" .. LOC_H,
-    width = "100%-" .. (R + BADGE_W + MODE_W),
+    x = L.stripX, y = "-" .. LOC_H,
+    width = L.locW,
     height = LOC_H,
   })
   icesus.hud.locationLabel:setStyleSheet(string.format([[
@@ -479,7 +1103,7 @@ function icesus.setupHUD()
     qproperty-alignment: 'AlignVCenter';
     padding: 0 14px;
   ]], P.bgPanel, P.text, P.border, FS))
-  pcall(function() icesus.hud.locationLabel:setFontSize(13) end)
+  pcall(function() icesus.hud.locationLabel:setFontSize(fsz("location", 13)) end)
   icesus.hud.locationLabel:echo([[<span style="color:#555">—</span>]])
 
   -- Map-save controls: an unsaved-changes badge (click = save now) and
@@ -500,15 +1124,15 @@ function icesus.setupHUD()
       font-size: 11pt;
       qproperty-alignment: 'AlignCenter';
     ]], P.bgPanel, P.textDim, P.border, P.border, FS))
-    pcall(function() lbl:setFontSize(10) end)
+    pcall(function() lbl:setFontSize(fsz("mapSave", 10)) end)
     return lbl
   end
   icesus.hud.mapSaveBadge = makeSaveControl(
-    "mapSaveBadge", R + MODE_W + BADGE_W, BADGE_W)
+    "mapSaveBadge", L.badgeX, BADGE_W)
   icesus.hud.mapSaveBadge:setClickCallback(function()
     icesus.mapper.saveCommand()
   end)
-  icesus.hud.mapModeBtn = makeSaveControl("mapModeBtn", R + MODE_W, MODE_W)
+  icesus.hud.mapModeBtn = makeSaveControl("mapModeBtn", L.modeX, MODE_W)
   icesus.hud.mapModeBtn:setClickCallback(function()
     icesus.mapper.toggleSaveMode()
   end)
@@ -538,7 +1162,7 @@ function icesus.setupHUD()
     ]], P.textBright, FS))
     -- 10pt fits "HP 142/200" inside a ~95 px gauge slot at this build's
     -- effective DPI when the gauge is only 32 px tall.
-    pcall(function() g.text:setFontSize(10) end)
+    pcall(function() g.text:setFontSize(fsz("vitals", 10)) end)
     g:setValue(0, 1, label)
     return g
   end
@@ -551,13 +1175,15 @@ function icesus.setupHUD()
   icesus.hud.psp = nil
 
   -- =====================================================================
-  -- RIGHT COLUMN — combat & comms panels.
-  --   Flat absolute layout (Geyser nested HBox/VBox have x/y bugs in
-  --   some Mudlet builds — see v0.2.1 changelog).
+  -- COMBAT & COMMS COLUMN — right-hand by default, left with
+  -- `hud side left`. Flat absolute layout (Geyser nested HBox/VBox
+  -- have x/y bugs in some Mudlet builds — see v0.2.1 changelog).
+  -- The widget keeps the name "icesus.right" whichever side it is on:
+  -- player scripts key off it.
   -- =====================================================================
   icesus.hud.right = Geyser.Container:new({
     name = "icesus.right",
-    x = "-" .. R, y = T,
+    x = L.colX, y = T,
     width = R,
     height = "100%-" .. (T + B),
   })
@@ -569,8 +1195,8 @@ function icesus.setupHUD()
   icesus.hud.rightBg:setStyleSheet(string.format([[
     background: %s;
     border: none;
-    border-left: 1px solid %s;
-  ]], P.bgMain, P.border))
+    %s: 1px solid %s;
+  ]], P.bgMain, L.colEdge, P.border))
 
   local PAD       = 6
   local BTN_H     = 38
@@ -600,7 +1226,7 @@ function icesus.setupHUD()
       font-size: 14pt;
       qproperty-alignment: 'AlignCenter';
     ]], P.textDim, P.border, FS))
-    pcall(function() btn:setFontSize(12) end)
+    pcall(function() btn:setFontSize(fsz("momentum", 12)) end)
     btn:echo([[<center><span>—</span></center>]])
     return btn
   end
@@ -632,7 +1258,7 @@ function icesus.setupHUD()
     font-weight: 600;
     qproperty-alignment: 'AlignCenter';
   ]], P.textBright, FS))
-  pcall(function() icesus.hud.castGauge.text:setFontSize(12) end)
+  pcall(function() icesus.hud.castGauge.text:setFontSize(fsz("cast", 12)) end)
   icesus.hud.castGauge:setValue(0, 1, "—")
 
   -- Effects + cooldowns: two stacked full-width rows. Stacking beats
@@ -652,7 +1278,7 @@ function icesus.setupHUD()
       font-size: 13pt;
       qproperty-alignment: 'AlignCenter';
     ]], P.bgPanel, P.textDim, P.border, FS))
-    pcall(function() lbl:setFontSize(11) end)
+    pcall(function() lbl:setFontSize(fsz("badges", 11)) end)
     return lbl
   end
   icesus.hud.effectsRow   = makeBadgeRow("effectsRow",   effectsY)
@@ -677,7 +1303,7 @@ function icesus.setupHUD()
     qproperty-alignment: 'AlignTop';
     padding: 4px;
   ]], P.bgPanel, P.text, P.border, FS))
-  pcall(function() icesus.hud.enemyLabel:setFontSize(12) end)
+  pcall(function() icesus.hud.enemyLabel:setFontSize(fsz("enemy", 12)) end)
   icesus.hud.enemyLabel:echo(
     [[<center><span style="color:#555">no targets</span></center>]])
 
@@ -688,11 +1314,43 @@ function icesus.setupHUD()
     width = R - PAD * 2,
     height = "100%-" .. (channelsY + PAD),
     autoWrap = true,
-    fontSize = 13,
+    fontSize = fsz("channels", 13),
     color = P.bgDeep,
   }, icesus.hud.right)
   icesus.hud.channels:setBufferSize(icesus.config.channelLines, icesus.config.channelLines)
   icesus.hud.channels:cecho("<grey>--- channels ---<reset>\n")
+
+  -- Customisation hook. Widgets exist and are styled by now, so this
+  -- is where a player script restyles or moves them without patching
+  -- the package. Both forms fire on every rebuild.
+  if type(icesus.onHudReady) == "function" then pcall(icesus.onHudReady) end
+  if raiseEvent then pcall(raiseEvent, "icesus.hudReady") end
+end
+
+-- Repaint every panel from the cached state, so a freshly rebuilt HUD
+-- isn't left showing placeholders until the next GMCP packet arrives.
+function icesus.refreshAll()
+  if not icesus.hud then return end
+  local fns = {
+    icesus.refreshIdentity, icesus.refreshExp, icesus.refreshCarry,
+    icesus.refreshGauges, icesus.refreshMomentum, icesus.refreshCasting,
+    icesus.refreshEffects, icesus.refreshCooldowns, icesus.refreshEnemies,
+    icesus.refreshRoom,
+  }
+  for _, fn in ipairs(fns) do
+    if type(fn) == "function" then pcall(fn) end
+  end
+  if icesus.mapper and icesus.mapper.refreshSaveUI then
+    pcall(icesus.mapper.refreshSaveUI)
+  end
+end
+
+-- Force a rebuild — after changing config, palette, fontSizes or
+-- fontStack from a script or an override file.
+function icesus.rebuildHUD()
+  icesus.hudSig = nil
+  icesus.setupHUD()
+  icesus.refreshAll()
 end
 
 function icesus.teardownHUD()
@@ -707,6 +1365,7 @@ function icesus.teardownHUD()
     if w and type(w.hide) == "function" then pcall(function() w:hide() end) end
   end
   icesus.hud = nil
+  icesus.hudSig = nil
   setBorderSizes(0, 0, 0, 0)
 end
 
@@ -784,7 +1443,7 @@ function icesus.refreshGauges()
         font-weight: 600;
         qproperty-alignment: 'AlignCenter';
       ]], P.textBright, icesus.fontStack))
-      pcall(function() icesus.hud.psp.text:setFontSize(10) end)
+      pcall(function() icesus.hud.psp.text:setFontSize(fsz("vitals", 10)) end)
     else
       icesus.hud.psp:show()
     end
@@ -1146,6 +1805,9 @@ function icesus.onBase()
     cecho("\n<lime_green>Icesus<reset> v"
       .. icesus.version .. "<reset> ready. "
       .. "<grey>Deep, earned progression in a world that rewards commitment.<reset>\n")
+    -- Override files: confirm what loaded, and surface any problem in
+    -- them here rather than on the quiet login screen.
+    pcall(icesus.user.report)
     if icesus.config.autoUpdate and tempTimer then
       tempTimer(10, function() pcall(icesus.update.check) end)
     end
@@ -2733,12 +3395,11 @@ end
 -- Self-update — once per session, fetch the latest version from
 -- the GitHub master branch and re-install if it's newer than the
 -- one currently loaded. Uses downloadFile + sysDownloadDone so it's
--- non-blocking. Players can disable by setting
--- icesus.config.autoUpdate = false before the package loads.
+-- non-blocking. Players opt out with `autoUpdate = false` under
+-- `config` in Icesus.user.lua; the flag is read at first Char.Base.
 -- =============================================================
 
 icesus.update = icesus.update or {}
-icesus.config.autoUpdate = (icesus.config.autoUpdate ~= false)
 
 local VERSION_URL = "https://raw.githubusercontent.com/Icesus-mud/mudlet-package/master/package/config.lua"
 local RELEASE_URL = "https://github.com/Icesus-mud/mudlet-package/releases/latest/download/Icesus.mpackage"
@@ -2898,22 +3559,55 @@ local function stripPinkfish(s)
   return (s:gsub("%%%^[%w_]+%%%^", ""))
 end
 
+-- Every colour below comes from icesus.chatStyle, read at echo time so
+-- an override file (or `hud reload`) takes effect on the next line
+-- without a HUD rebuild.
+local function cs()
+  return icesus.chatStyle or {}
+end
+
+-- Tag chunk for a channel or speech kind. perChannel wins over the
+-- generic colour, so "chat" and "sales" can differ.
+local function styleTag(name, generic)
+  local st = cs()
+  local col = (st.perChannel and st.perChannel[name]) or generic or "DodgerBlue"
+  return string.format("<%s>[%s]<reset>", col, tostring(name))
+end
+
+-- Optional recolour of the message body. Empty keeps whatever colours
+-- the server sent.
+local function styleText(text)
+  local col = cs().text
+  text = tostring(text or "")
+  if col and col ~= "" then
+    return string.format("<%s>%s<reset>", col, text)
+  end
+  return text
+end
+
 -- Shared echo helper. tag is the colourised header chunk (channel name,
 -- "tell", or speech kind); body is the rendered "talker: text" string.
 local function echoChannel(tag, body)
   if not icesus.hud or not icesus.hud.channels then return end
-  local time = icesus.config.channelTimes and (os.date("%H:%M ")) or ""
+  local time = ""
+  if icesus.config.channelTimes then
+    time = string.format("<%s>%s<reset>", cs().time or "grey",
+      os.date("%H:%M "))
+  end
   icesus.hud.channels:cecho(string.format(
-    "<grey>%s<reset>%s %s\n", time, tag, stripPinkfish(body)))
+    "%s%s %s\n", time, tag, stripPinkfish(body)))
 end
 
 -- Render "talker: text" with self echoes styled differently so own
 -- messages stand out without resorting to name comparison.
 local function fmtTalkerText(talker, text, isSelf)
+  local st = cs()
   if isSelf then
-    return string.format("<DimGrey>you<reset>: %s", text)
+    return string.format("<%s>you<reset>: %s",
+      st.selfTalker or "DimGrey", styleText(text))
   end
-  return string.format("<gold>%s<reset>: %s", talker or "", text or "")
+  return string.format("<%s>%s<reset>: %s",
+    st.talker or "gold", tostring(talker or ""), styleText(text))
 end
 
 function icesus.onRoomSpeech()
@@ -2926,9 +3620,9 @@ function icesus.onRoomSpeech()
   -- For emotes the server has already woven the talker name into the
   -- text ("Idles waves cheerfully") — render verbatim, do not prepend.
   if kind == "emote" then
-    echoChannel(string.format("<SteelBlue>[%s]<reset>", kind), text)
+    echoChannel(styleTag(kind, cs().emote), styleText(text))
   else
-    echoChannel(string.format("<DodgerBlue>[%s]<reset>", kind),
+    echoChannel(styleTag(kind, cs().speech),
       fmtTalkerText(talker, text, isSelf))
   end
 end
@@ -2939,7 +3633,7 @@ function icesus.onCommTell()
   local talker = tostring(p.talker or "")
   local text   = tostring(p.text or "")
   local isSelf = (p.self == 1) or (p.self == true)
-  echoChannel("<MediumOrchid>[tell]<reset>",
+  echoChannel(styleTag("tell", cs().tell),
     fmtTalkerText(talker, text, isSelf))
 end
 
@@ -2954,9 +3648,9 @@ function icesus.onCommText()
   -- Channel emotes: text already includes the talker name (parsed by
   -- EMOTE_D server-side). Render verbatim.
   if kind == "emote" then
-    echoChannel(string.format("<DodgerBlue>[%s]<reset>", channel), text)
+    echoChannel(styleTag(channel, cs().channel), styleText(text))
   else
-    echoChannel(string.format("<DodgerBlue>[%s]<reset>", channel),
+    echoChannel(styleTag(channel, cs().channel),
       fmtTalkerText(talker, text, isSelf))
   end
 end
@@ -3006,6 +3700,17 @@ local function reg(event, fn)
   table.insert(icesus.handlers, registerAnonymousEventHandler(event, fn))
 end
 
+-- Register by NAME, not by value: the handler looks the function up on
+-- the icesus table when the event fires. That is what lets a player
+-- script replace icesus.onCommText (or any other handler) at any time
+-- and have it take effect without reinstalling the package.
+local function regFn(event, name)
+  reg(event, function(...)
+    local fn = icesus[name]
+    if type(fn) == "function" then return fn(...) end
+  end)
+end
+
 function icesus.install()
   icesus.uninstall()                            -- idempotent
   -- Drop Mudlet's bundled generic_mapper synchronously, before
@@ -3019,20 +3724,21 @@ function icesus.install()
   -- exactly wide enough to lose it.
   pcall(icesus.update.removeGenericMapper)
   icesus.loadSettings()       -- before setupHUD: the mode pill reads it
+  icesus.user.apply()         -- then the player's own overrides on top
   icesus.setupHUD()
-  reg("gmcp.Char.Base",       icesus.onBase)
-  reg("gmcp.Char.Vitals",     icesus.onVitals)
-  reg("gmcp.Char.Maxstats",   icesus.onMaxstats)
-  reg("gmcp.Char.Status",     icesus.onStatus)
-  reg("gmcp.Char.Casting",    icesus.onCasting)
-  reg("gmcp.Char.Cooldowns",  icesus.onCooldowns)
-  reg("gmcp.Char.EnemyDeath", icesus.onEnemyDeath)
-  reg("gmcp.Room.Info",            icesus.onRoomInfo)
-  reg("gmcp.Room.Speech",          icesus.onRoomSpeech)
-  reg("gmcp.Comm.Channel.Tell",    icesus.onCommTell)
-  reg("gmcp.Comm.Channel.Text",    icesus.onCommText)
-  reg("sysConnectionEvent",   icesus.subscribeGMCP)
-  reg("sysExitEvent",         icesus.uninstall)
+  regFn("gmcp.Char.Base",       "onBase")
+  regFn("gmcp.Char.Vitals",     "onVitals")
+  regFn("gmcp.Char.Maxstats",   "onMaxstats")
+  regFn("gmcp.Char.Status",     "onStatus")
+  regFn("gmcp.Char.Casting",    "onCasting")
+  regFn("gmcp.Char.Cooldowns",  "onCooldowns")
+  regFn("gmcp.Char.EnemyDeath", "onEnemyDeath")
+  regFn("gmcp.Room.Info",            "onRoomInfo")
+  regFn("gmcp.Room.Speech",          "onRoomSpeech")
+  regFn("gmcp.Comm.Channel.Tell",    "onCommTell")
+  regFn("gmcp.Comm.Channel.Text",    "onCommText")
+  regFn("sysConnectionEvent",   "subscribeGMCP")
+  regFn("sysExitEvent",         "uninstall")
   -- A network drop / server reboot doesn't close the profile, so
   -- sysExitEvent never fires there — flush the map on disconnect too.
   reg("sysDisconnectionEvent", function()

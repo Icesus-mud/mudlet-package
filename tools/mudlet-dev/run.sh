@@ -18,6 +18,8 @@
 #   XVFB_GEOMETRY     (default: 1600x1000x24)
 #   WAIT_SECONDS      (default: 8)
 #   PROFILE_NAME      (default: icesus-dev)
+#   ICESUS_USER_FILE    path copied into the profile as Icesus.user.lua
+#   ICESUS_CUSTOM_FILE  path copied into the profile as Icesus.custom.lua
 
 set -euo pipefail
 
@@ -158,6 +160,18 @@ if [[ "$MODE" == "fake" ]]; then
   echo "true"  >"$PROFILE_DIR/AutoLogin"
 else
   echo "false" >"$PROFILE_DIR/AutoLogin"
+fi
+
+# Optional player-customisation files. The profile directory is what
+# getMudletHomeDir() returns, so dropping them here is exactly what a
+# player does by hand.
+if [[ -n "${ICESUS_USER_FILE:-}" ]]; then
+  cp "$ICESUS_USER_FILE" "$PROFILE_DIR/Icesus.user.lua"
+  echo "Seeded Icesus.user.lua from $ICESUS_USER_FILE"
+fi
+if [[ -n "${ICESUS_CUSTOM_FILE:-}" ]]; then
+  cp "$ICESUS_CUSTOM_FILE" "$PROFILE_DIR/Icesus.custom.lua"
+  echo "Seeded Icesus.custom.lua from $ICESUS_CUSTOM_FILE"
 fi
 
 # -----------------------------------------------------------------

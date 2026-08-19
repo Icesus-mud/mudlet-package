@@ -114,6 +114,41 @@ silently (gauges sit at zero, panels stay empty), so cross-check
 the screenshot against expectations before declaring the fixture
 correct.
 
+## Testing player customisation
+
+The profile directory is what `getMudletHomeDir()` returns, so the two
+override files a player writes by hand can be seeded into a run:
+
+```sh
+ICESUS_USER_FILE=/tmp/Icesus.user.lua ./tools/mudlet-dev/run.sh fake
+ICESUS_CUSTOM_FILE=/tmp/Icesus.custom.lua ./tools/mudlet-dev/run.sh fake
+```
+
+Each is copied into the fresh profile before Mudlet launches. Handy for
+checking a layout override renders, or that a `Icesus.custom.lua`
+example in the README actually works — the customisation surface is the
+one part of the package where the failure mode is "silently keeps the
+default", which a screenshot catches and a unit test can't.
+
+To drive the `hud` command in a headless run, put the calls in a
+`Icesus.custom.lua` behind `icesus.onHudReady` with a one-shot guard
+(the command rebuilds the HUD, which fires the hook again).
+
+## Unit tests
+
+Two suites, both loading the real `icesus.core` chunk out of
+`package/Icesus.xml` under a mocked Mudlet API. No Mudlet, no X, no
+network — run them on every change:
+
+```sh
+lua5.4 tools/mudlet-dev/test_mapper.lua    # mapper, persistence, save modes
+lua5.4 tools/mudlet-dev/test_user.lua      # customisation layer, hud command
+```
+
+`test_mapper.lua` mocks the map database and skips the HUD build;
+`test_user.lua` mocks the widgets instead and lets `icesus.install()`
+run for real. Each exits non-zero on failure.
+
 ## Connecting to live or dev
 
 ```sh
