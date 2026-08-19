@@ -44,6 +44,14 @@
   name after the ready banner instead of silently doing nothing, and a
   broken file never costs you the HUD. See the README's "Customising".
 
+- **One line, once per profile, so players know any of this exists.**
+  After the first ready banner: colours, fonts and which side the panels
+  sit on are yours to change, type `hud`. It is a one-shot, recorded in
+  `Icesus.settings.lua`, and `hud reset` does not bring it back. `hud`
+  and the starter file both link the README's reference by URL rather
+  than naming a file nobody can click, and point at `showColors()` and
+  `getAvailableFonts()` for the values they accept.
+
 - **`hud` command.** `hud` on its own reports what is set and which
   file it came from; `hud side left|right` moves the combat and comms
   column to either side of the main window; `hud font <name>` and

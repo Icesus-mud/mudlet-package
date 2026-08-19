@@ -281,7 +281,9 @@ profile directory are yours instead — install, update, uninstall and
   replacing what the package does with your own code.
 
 Both sit next to your map, in Mudlet's profile directory
-(`lua getMudletHomeDir()` prints the path).
+(`lua getMudletHomeDir()` prints the path). Neither one can hurt your
+map or your map settings: if a file has a mistake in it the package says
+so and carries on with its own defaults.
 
 ### The short version
 
@@ -343,18 +345,30 @@ return {
 | `config` | `hudSide`, `autoUpdate`, `borderTop`, `borderRight`, `borderBottom`, `channelLines`, `channelTimes`, `expMaxW` |
 | `fontSizes` | `identity`, `carry`, `exp`, `location`, `mapSave`, `vitals`, `momentum`, `cast`, `badges`, `enemy`, `channels` |
 | `chatStyle` | `time`, `channel`, `tell`, `speech`, `emote`, `talker`, `selfTalker`, `text`, `perChannel` |
-| `palette` | every colour token the HUD uses — see `icesus.palette` in the script; `hpGrad`, `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` take a `{ from, to }` pair |
+| `palette` | surfaces: `bgDeep`, `bgMain`, `bgPanel`, `bgInput`, `border`, `borderBright` · text: `text`, `textDim`, `textBright` · accents: `ice`, `iceBright`, `iceGlow`, `green`, `red`, `amber`, `cyan` · gauge gradients, each a `{ from, to }` pair: `hpGrad`, `hpGradC` (critical), `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` |
 | `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped |
 
-Colours are Mudlet colour names (`chatStyle`) or CSS colours
-(`palette`, `effectStyles`). `chatStyle.text = ""` leaves the server's
-own colours alone, which is the default.
+Colours are Mudlet colour names in `chatStyle` (`lua showColors()`
+prints every name you can use) and CSS colours in `palette` and
+`effectStyles` — `#7dd3fc`, or `rgba(125,211,252,0.25)` when you want
+transparency. `chatStyle.text = ""` leaves the server's own colours
+alone, which is the default.
+
+Fonts are whatever your system has installed, in preference order;
+Mudlet falls through the list until one exists. `lua getAvailableFonts()`
+prints what you can choose from.
 
 Get a key wrong and the package tells you which line it ignored, after
 the ready banner and again under `hud`. It never silently drops a typo.
 
 Data only in this file: no Mudlet function calls, no `if` on game
 state. That's what the other file is for.
+
+**If you make the HUD unreadable**, in rising order of bluntness:
+`hud reset` forgets anything the `hud` command set; commenting the line
+out and running `hud reload` undoes one setting from the file; and
+deleting `Icesus.user.lua` (then `hud reload`) puts everything back to
+the shipped look. None of it touches your map.
 
 ### Icesus.custom.lua
 

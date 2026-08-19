@@ -662,6 +662,47 @@ do
 end
 
 do
+  -- The one-time discovery line: without it nobody finds `hud`.
+  local icesus, w = load_icesus()
+  icesus.hudHint()
+  check("the hint tells a first-time player about hud",
+    saw(w.echoes, "type <yellow>hud"), joined(w.echoes))
+  check("the hint is recorded as shown", icesus.settings.hudHintShown == true)
+
+  w.echoes = {}
+  icesus.hudHint()
+  check("the hint is not repeated in the same session",
+    not saw(w.echoes, "yours to change"), joined(w.echoes))
+
+  local next_session = load_icesus({ settings = { hudHintShown = true } })
+  check("the hint survives into the next session as shown",
+    next_session.settings.hudHintShown == true)
+  next_session.hudCommand("reset")
+  check("`hud reset` does not bring the hint back",
+    next_session.settings.hudHintShown == true)
+end
+
+do
+  local icesus, w = load_icesus()
+  icesus.hudCommand("")
+  check("`hud` links the full reference by URL",
+    saw(w.echoes, "github.com/Icesus-mud/mudlet-package#customising"),
+    joined(w.echoes))
+end
+
+do
+  local icesus, w = load_icesus()
+  icesus.hudCommand("example")
+  local body = read_file(HOME .. "/Icesus.user.lua")
+  check("the starter file links the reference",
+    body:find("#customising", 1, true) ~= nil)
+  check("the starter file says how to list colours",
+    body:find("showColors", 1, true) ~= nil)
+  check("the starter file says how to list fonts",
+    body:find("getAvailableFonts", 1, true) ~= nil)
+end
+
+do
   local icesus, w = load_icesus()
   icesus.hudCommand("wat")
   check("an unknown subcommand is refused", saw(w.echoes, "no such HUD command"),

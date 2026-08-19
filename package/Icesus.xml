@@ -183,6 +183,8 @@ function icesus.loadSettings()
                and t.hudFont or nil,
     chatSize = (tonumber(t.chatSize) and tonumber(t.chatSize) > 0)
                and tonumber(t.chatSize) or nil,
+    -- One-shot: the "you can customise this" line has been shown.
+    hudHintShown = t.hudHintShown and true or nil,
   }
 end
 
@@ -585,6 +587,11 @@ local EXAMPLE_FILE = [==[
 --
 -- Edit, then run `hud reload` in-game — no relog needed.
 -- Delete a line to go back to the package default.
+--
+-- Every setting, with what it does and what values it takes:
+--   https://github.com/Icesus-mud/mudlet-package#customising
+-- Colour names you can use: type  lua showColors()  in Mudlet.
+-- Fonts you have installed:  type  lua getAvailableFonts()
 
 return {
   -- Which side the combat / comms column sits on: "right" or "left".
@@ -658,6 +665,18 @@ function icesus.user.writeExample()
   return true
 end
 
+-- Shown once per profile, right after the first ready banner: the only
+-- moment a player learns the HUD is theirs to change.
+function icesus.hudHint()
+  icesus.settings = icesus.settings or {}
+  if icesus.settings.hudHintShown then return end
+  icesus.settings.hudHintShown = true
+  icesus.saveSettings()
+  cecho("<grey>Colours, fonts, and which side the panels sit on are "
+    .. "yours to change \226\128\148 type <yellow>hud<reset>"
+    .. "<grey>. Your changes survive updates.<reset>\n")
+end
+
 -- =============================================================
 -- `hud` command — the small set of tweaks worth having without
 -- writing Lua. Everything it sets is persisted in
@@ -691,7 +710,8 @@ local function hudStatus()
   cecho("  hud example           write a starter Icesus.user.lua\n")
   cecho("  hud reload            re-read the override files\n")
   cecho("  hud reset             forget the settings above\n")
-  cecho("  Full reference: README \"Customising\".<reset>\n")
+  cecho("  Full reference: "
+    .. "https://github.com/Icesus-mud/mudlet-package#customising<reset>\n")
 end
 
 -- Re-layer, rebuild, then report. A setting that Icesus.user.lua pins
@@ -791,6 +811,8 @@ function icesus.hudCommand(arg)
     icesus.settings.hudSide  = nil
     icesus.settings.hudFont  = nil
     icesus.settings.chatSize = nil
+    -- hudHintShown deliberately survives: it is a one-shot, not a
+    -- preference, and re-showing it would read as a bug.
     icesus.saveSettings()
     cecho("\n<lime_green>Icesus<reset> HUD settings forgotten "
       .. "<grey>(Icesus.user.lua is untouched).<reset>\n")
@@ -1808,6 +1830,10 @@ function icesus.onBase()
     -- Override files: confirm what loaded, and surface any problem in
     -- them here rather than on the quiet login screen.
     pcall(icesus.user.report)
+    -- Tell each profile once that the HUD can be changed at all. A
+    -- player who doesn't know `hud` exists will never read the docs
+    -- that explain it, and a line every session would be nagging.
+    pcall(icesus.hudHint)
     if icesus.config.autoUpdate and tempTimer then
       tempTimer(10, function() pcall(icesus.update.check) end)
     end
