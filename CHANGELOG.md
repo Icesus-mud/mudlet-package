@@ -2,6 +2,35 @@
 
 ## v1.0.17 — 2026-08-19
 
+- **Issue #12: rooms piling into "Default Area", and the overlaps that
+  came with it.** Mudlet's `addAreaName` refuses a name that already
+  exists and returns -1, and areas outlive the rooms in them —
+  `deleteRoom` leaves the area behind. So any state where Mudlet still
+  held the area names while the package's id table did not (a
+  `mapper reset`, v1.0.16's idmap quarantine, a deleted
+  `Icesus.idmap.lua`) made every `ensureArea` call fail: rooms went to
+  Default Area, and because the gridmode flip is gated on a real area
+  id, the outworld lost its pixel-map rendering and drew as a
+  node-and-line graph with exit arrows. `ensureArea` now adopts the
+  existing area via `getAreaTable` instead. That also accounts for most
+  of what the report described as pre-placed neighbours: with the area
+  and gridmode restored, unvisited outworld tiles render as blank grid
+  cells rather than arrowed circles, and indoor neighbours go back to
+  being invisible in the area view. (Reported by chosig.)
+
+- **A reset no longer leaves the area list behind.** `mapper reset`
+  deletes the areas it created once they are empty, so an empty map
+  stops showing a full phone book of area names. Areas that still hold
+  rooms, and any the player made themselves, are left alone.
+
+- **Pre-placed neighbours stop landing on top of each other.** Guessing
+  a room's position by offsetting from the room you are standing in is
+  fine for a grid and wrong for a building: two rooms could guess the
+  same cell and stack. The guess is now taken only while the cell is
+  free, and a room that turns out to be in a different area than the
+  neighbour who placed it claims its cell in that area on arrival —
+  otherwise the next building in that area was handed the same slot.
+
 - **Customisation that survives an update.** Every release reinstalls
   the package, which took any edit made inside its script with it —
   players who had recoloured the channel feed were re-patching after

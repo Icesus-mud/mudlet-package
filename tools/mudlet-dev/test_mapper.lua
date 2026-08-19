@@ -43,6 +43,8 @@ end
 local MOCK_TIME = 1000          -- controllable clock (seconds)
 local calls                     -- per-test driver call counters
 local rooms                     -- fake Mudlet room DB: id -> room
+local areas                     -- fake Mudlet area table: name -> id
+local nextAreaId
 local SETTINGS_ON_DISK = nil    -- non-nil: table.load fills from this
 
 -- The persistence layer (atomic sidecar writes, paired backups, the
@@ -55,6 +57,8 @@ local function bump(name) calls[name] = (calls[name] or 0) + 1 end
 local function fresh_world()
   calls = {}
   rooms = {}
+  areas = {}
+  nextAreaId = 1
   MOCK_TIME = 1000
   SETTINGS_ON_DISK = nil
   os.execute("rm -rf '" .. HOME .. "' && mkdir -p '" .. HOME .. "'")
@@ -76,7 +80,37 @@ mud.getRoomArea = function(id) return rooms[id] and rooms[id].area or -1 end
 mud.getRoomName = function(id) return rooms[id] and (rooms[id].name or "") or nil end
 mud.setRoomName = function(id, n) bump("setRoomName"); if rooms[id] then rooms[id].name = n end end
 mud.setRoomArea = function(id, a) bump("setRoomArea"); if rooms[id] then rooms[id].area = a end end
-mud.addAreaName = function(name) bump("addAreaName"); return 1 end
+-- Mudlet's addAreaName refuses a name that already exists and returns
+-- -1 (the old mock always returned 1, which is why issue #12 got past
+-- this suite). Areas live in the map file and outlive their rooms.
+mud.addAreaName = function(name)
+  bump("addAreaName")
+  if areas[name] then return -1 end
+  local id = nextAreaId
+  nextAreaId = nextAreaId + 1
+  areas[name] = id
+  return id
+end
+mud.getAreaTable = function()
+  bump("getAreaTable")
+  local t = {}
+  for n, i in pairs(areas) do t[n] = i end
+  return t
+end
+mud.getAreaRooms = function(id)
+  local list = {}
+  for rid, r in pairs(rooms) do
+    if r.area == id then list[#list + 1] = rid end
+  end
+  return list
+end
+mud.deleteArea = function(id)
+  bump("deleteArea")
+  for n, i in pairs(areas) do
+    if i == id then areas[n] = nil end
+  end
+  return true
+end
 mud.setRoomCoordinates = function(id, x, y, z)
   bump("setRoomCoordinates"); if rooms[id] then rooms[id].coords = { x, y, z } end
 end
@@ -1288,6 +1322,176 @@ do
           icesus.mapper.idMap.idToRoom[id] ~= nil)
   end
 end
+
+
+-- ================================================================
+-- Issue #12: an area that already exists in Mudlet's map. Areas
+-- outlive rooms, so after a reset (or an idmap quarantine) every
+-- addAreaName returns -1 and rooms used to pile into Default Area.
+-- ================================================================
+do
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+
+  -- First life: map a room, which creates the area.
+  icesus.mapper.onRoomInfo(roominfo("aaaaaaaa", { area = "Ereldon" }))
+  local areaId = icesus.mapper.idMap.areaToInt["Ereldon"]
+  check("first visit creates the area", (areaId or 0) > 0, tostring(areaId))
+  local roomId = icesus.mapper.idMap.idToRoom["aaaaaaaa"]
+  check("first visit files the room in it", rooms[roomId].area == areaId)
+
+  -- Second life: our id table is gone (reset / quarantine / deleted
+  -- file) but Mudlet still holds the area name.
+  icesus.mapper.idMap = { idToRoom = {}, areaToInt = {}, placed = {},
+                          gridmoded = {}, areaCoords = {}, seen = {},
+                          next_id = 1 }
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("bbbbbbbb", { area = "Ereldon" }))
+  local reId = icesus.mapper.idMap.areaToInt["Ereldon"]
+  check("the existing area is adopted, not refused", reId == areaId,
+    tostring(reId) .. " vs " .. tostring(areaId))
+  local newRoom = icesus.mapper.idMap.idToRoom["bbbbbbbb"]
+  check("the room lands in the real area, not Default Area",
+    rooms[newRoom].area == areaId, tostring(rooms[newRoom].area))
+  check("adopting an area needs no addAreaName retry loop",
+    (calls.addAreaName or 0) <= 1, "addAreaName=" .. (calls.addAreaName or 0))
+end
+
+do
+  -- Same state, outworld: the gridmode flip is gated on a real area id,
+  -- so a -1 also cost the outworld its pixel-map rendering.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("cccccccc",
+    { area = "Outworld", coords = { 10, 20, 0 }, terrain = "plains" }))
+  local areaId = icesus.mapper.idMap.areaToInt["Outworld"]
+  icesus.mapper.idMap = { idToRoom = {}, areaToInt = {}, placed = {},
+                          gridmoded = {}, areaCoords = {}, seen = {},
+                          next_id = 1 }
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("dddddddd",
+    { area = "Outworld", coords = { 11, 20, 0 }, terrain = "plains" }))
+  check("outworld area is adopted after an idmap loss",
+    icesus.mapper.idMap.areaToInt["Outworld"] == areaId)
+  check("gridmode is applied to the adopted area",
+    icesus.mapper.idMap.gridmoded[areaId] == true)
+  check("gridmode call actually went out", (calls.setGridMode or 0) > 0)
+end
+
+-- ================================================================
+-- Issue #12: `mapper reset` must not leave the area list behind.
+-- ================================================================
+do
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("eeeeeeee", { area = "Ereldon" }))
+  icesus.mapper.onRoomInfo(roominfo("ffffffff", { area = "Vaerlon" }))
+  local keep = mud.addAreaName("Player's own area")
+  check("two areas mapped plus one of the player's",
+    keep > 0 and next(icesus.mapper.idMap.areaToInt) ~= nil)
+
+  icesus.mapper.reset(true)
+  local tbl = mud.getAreaTable()
+  check("reset removed the area it created (Ereldon)", tbl["Ereldon"] == nil)
+  check("reset removed the area it created (Vaerlon)", tbl["Vaerlon"] == nil)
+  check("reset left the player's own area alone",
+    tbl["Player's own area"] == keep)
+  check("a fresh room after reset gets a real area",
+    (function()
+      icesus.mapper.onRoomInfo(roominfo("11111111", { area = "Ereldon" }))
+      local a = icesus.mapper.idMap.areaToInt["Ereldon"]
+      local rid = icesus.mapper.idMap.idToRoom["11111111"]
+      return (a or 0) > 0 and rooms[rid].area == a
+    end)())
+end
+
+do
+  -- An area of ours that still holds rooms is not deleted: the rooms
+  -- would be orphaned, and that only happens if something else put
+  -- them there.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("22222222", { area = "Ereldon" }))
+  local areaId = icesus.mapper.idMap.areaToInt["Ereldon"]
+  rooms[9999] = { exits = {}, special = {}, stub = {}, area = areaId }
+  icesus.mapper.reset(true)
+  check("an area still holding a room survives the reset",
+    mud.getAreaTable()["Ereldon"] == areaId)
+end
+
+-- ================================================================
+-- Issue #12: pre-placement guesses must not stack rooms on one cell.
+-- ================================================================
+do
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  -- Room A gets a slot, and its north neighbour X is pre-placed one
+  -- cell above it.
+  icesus.mapper.onRoomInfo(roominfo("aa000001",
+    { area = "Inn", exits = { north = "bb000001" } }))
+  local m = icesus.mapper.idMap
+  local a = m.placed["aa000001"]
+  local x = m.placed["bb000001"]
+  check("a neighbour guess is taken while the cell is free", x ~= nil)
+  check("the guess sits one cell north of its anchor",
+    x and x[1] == a[1] and x[2] == a[2] + 1, x and table.concat(x, ",") or "nil")
+
+  -- Room B sits two cells north of A — so its own south neighbour Y
+  -- would be guessed onto the cell X already holds. Indoor layouts are
+  -- not grids, so this is the ordinary case, not a contrived one.
+  m.placed["cc000001"] = { a[1], a[2] + 2, a[3] }
+  icesus.mapper.onRoomInfo(roominfo("cc000001",
+    { area = "Inn", exits = { south = "dd000001" } }))
+  local y = m.placed["dd000001"]
+  check("a guess onto an occupied cell is declined",
+    y == nil, y and table.concat(y, ",") or "nil")
+  check("the room already on that cell keeps it",
+    m.placed["bb000001"][1] == x[1] and m.placed["bb000001"][2] == x[2])
+
+  -- Declining the guess is not the same as losing the room: its own
+  -- Room.Info places it properly.
+  icesus.mapper.onRoomInfo(roominfo("dd000001", { area = "Inn" }))
+  local placed = m.placed["dd000001"]
+  check("the declined room is placed on its own visit", placed ~= nil)
+  local clash = false
+  for hex, q in pairs(m.placed) do
+    if hex ~= "dd000001" and placed and q[1] == placed[1]
+       and q[2] == placed[2] and q[3] == placed[3] then
+      clash = true
+    end
+  end
+  check("and it does not land on top of another room", not clash)
+end
+
+do
+  -- A pre-placed room that turns out to be in a different area claims
+  -- its cell there on arrival, so the next building in that area does
+  -- not get the same slot.
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("33333333",
+    { area = "Street", exits = { north = "44444444" } }))
+  local m = icesus.mapper.idMap
+  local guess = m.placed["44444444"]
+  check("neighbour was pre-placed", guess ~= nil)
+
+  -- Enter it: it is actually inside a shop, its own area.
+  icesus.mapper.onRoomInfo(roominfo("44444444", { area = "Shop" }))
+  local shopId = m.areaToInt["Shop"]
+  local key = guess[1] .. "," .. guess[2] .. "," .. guess[3]
+  check("the cell is claimed in the room's real area",
+    m.areaCoords[shopId] and m.areaCoords[shopId][key] == true)
+
+  -- A second Shop room must not be handed the same cell.
+  icesus.mapper.lastHexId = "44444444"
+  icesus.mapper.onRoomInfo(roominfo("55555555", { area = "Shop" }))
+  local second = m.placed["55555555"]
+  check("the next room in that area gets a different cell",
+    not (second[1] == guess[1] and second[2] == guess[2]
+         and second[3] == guess[3]),
+    table.concat(second, ","))
+end
+
 
 print(string.format("\n%d/%d checks passed, %d failed", total - failures, total, failures))
 os.exit(failures == 0 and 0 or 1)

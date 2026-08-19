@@ -2231,6 +2231,15 @@ end
 -- coordinate and spiralling outward on the z-plane. Used to scatter
 -- indoor buildings (Shanty Town, inn cellars, …) near their entrance
 -- tiles instead of piling them all at (0,0,0).
+-- Is a cell still free in this area's occupancy map?
+local function coordFree(areaId, x, y, z)
+  if not areaId or areaId <= 0 then return true end
+  local m = icesus.mapper.idMap
+  local used = m.areaCoords and m.areaCoords[areaId]
+  if not used then return true end
+  return not used[x .. "," .. y .. "," .. z]
+end
+
 local function freeCoord(areaId, baseX, baseY, baseZ)
   local m = icesus.mapper.idMap
   m.areaCoords = m.areaCoords or {}                -- see markCoord note
@@ -2510,6 +2519,26 @@ local function ensureArea(name)
   local m = icesus.mapper.idMap
   local areaId = m.areaToInt[name]
   if areaId then return areaId end
+
+  -- Areas outlive both our rooms and our id table. deleteRoom leaves
+  -- the area behind, so `mapper reset`, the v1.0.16 idmap quarantine,
+  -- and "player deleted Icesus.idmap.lua but kept the map" all end up
+  -- with Mudlet holding every area name while areaToInt is empty. In
+  -- that state addAreaName refuses the name and returns -1, which used
+  -- to mean every room landed in Default Area and the outworld never
+  -- got gridmode (issue #12). Adopt the existing area instead.
+  if getAreaTable then
+    local ok, tbl = pcall(getAreaTable)
+    if ok and type(tbl) == "table" then
+      local existing = tonumber(tbl[name])
+      if existing and existing > 0 then
+        m.areaToInt[name] = existing
+        icesus.mapper.dirty = true
+        return existing
+      end
+    end
+  end
+
   local ok, v = pcall(addAreaName, name)
   if ok and type(v) == "number" and v > 0 then
     areaId = v
@@ -2750,6 +2779,13 @@ function icesus.mapper.onRoomInfo(r)
     local fx, fy, fz = freeCoord(areaId, baseX, baseY, baseZ)
     pcall(setRoomCoordinates, roomId, fx, fy, fz)
     m.placed[hexId] = { fx, fy, fz }
+  elseif areaId and areaId > 0 then
+    -- Already placed, usually by a neighbour's pre-placement guess,
+    -- which could only register the cell under *that* room's area. Now
+    -- that the room has told us which area it is actually in, claim the
+    -- cell there too, or freeCoord will hand it to the next building.
+    local p = m.placed[hexId]
+    markCoord(areaId, p[1], p[2], p[3])
   end
 
   -- Terrain glyph + env tint. Server ships r.terrain for every tile
@@ -2815,11 +2851,20 @@ function icesus.mapper.onRoomInfo(r)
               local p = m.placed[hexId]
               local o = DIR_OFFSET[dir]
               local dx, dy, dz = p[1] + o[1], p[2] + o[2], p[3] + o[3]
-              pcall(setRoomCoordinates, destId, dx, dy, dz)
-              m.placed[destHash] = { dx, dy, dz }
-              -- Same-area cardinal neighbour — register the slot so
-              -- freeCoord (for future buildings) knows it's taken.
-              markCoord(areaId, dx, dy, dz)
+              -- Offsetting from this room is a guess about a room we
+              -- have never been in, and indoor layouts are not grids:
+              -- two rooms can both guess the same cell and land on top
+              -- of each other (issue #12, "a lot of overlap"). Take the
+              -- guess only while the cell is free; otherwise leave the
+              -- room unplaced and let its own Room.Info place it, by
+              -- server coords outworld or freeCoord indoors.
+              if coordFree(areaId, dx, dy, dz) then
+                pcall(setRoomCoordinates, destId, dx, dy, dz)
+                m.placed[destHash] = { dx, dy, dz }
+                -- Same-area cardinal neighbour — register the slot so
+                -- freeCoord (for future buildings) knows it's taken.
+                markCoord(areaId, dx, dy, dz)
+              end
             end
           elseif setExitStub then
             -- Cardinal exit with unknown destination — stub so the
@@ -3234,6 +3279,24 @@ function icesus.mapper.reset(silent)
     end
     if icesus.mapper.idMap.cursorRoom then
       pcall(deleteRoom, icesus.mapper.idMap.cursorRoom)
+    end
+  end
+  -- Drop the areas we created, now that they're empty. Without this a
+  -- reset leaves the full area list in the map with nothing in it — the
+  -- "all the area names are populated from start, even with an empty
+  -- map" half of issue #12. Anything that still holds rooms (a room the
+  -- player made, or one of ours we somehow missed) is left alone, and
+  -- areas we never created are never touched.
+  if deleteArea and icesus.mapper.idMap then
+    for _, aid in pairs(icesus.mapper.idMap.areaToInt or {}) do
+      local empty = true
+      if getAreaRooms then
+        local ok, list = pcall(getAreaRooms, aid)
+        if ok and type(list) == "table" and next(list) ~= nil then
+          empty = false
+        end
+      end
+      if empty then pcall(deleteArea, aid) end
     end
   end
   if os.remove then pcall(os.remove, mapDataPath()) end
