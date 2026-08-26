@@ -111,7 +111,7 @@ icesus = icesus or {}
 -- package info; fall back to the literal for dev hot-reload from disk
 -- (when this file isn't loaded as an installed package yet).
 icesus.version = (getPackageInfo and getPackageInfo("Icesus")
-                  and getPackageInfo("Icesus").version) or "1.0.17"
+                  and getPackageInfo("Icesus").version) or "1.0.18"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -290,6 +290,12 @@ icesus.effectStyles = {
   ["chilled"]        = { fg = "#bae6fd", bg = "rgba(186,230,253,0.18)", bd = "rgba(186,230,253,0.40)" },
   ["blessed"]        = { fg = "#fde047", bg = "rgba(253,224,71,0.18)",  bd = "rgba(253,224,71,0.40)" },
   ["cursed"]         = { fg = "#c084fc", bg = "rgba(192,132,252,0.18)", bd = "rgba(192,132,252,0.40)" },
+  -- Concealment (Char.Status "stealth") shares this table so it can be
+  -- restyled the same way, but wears cool, quiet colours: this is a
+  -- state the player switched on, not bad news happening to them.
+  ["moving silently"]   = { fg = "#94a3b8", bg = "rgba(148,163,184,0.14)", bd = "rgba(148,163,184,0.30)" },
+  ["hiding in shadows"] = { fg = "#a5b4fc", bg = "rgba(165,180,252,0.14)", bd = "rgba(165,180,252,0.32)" },
+  ["invisible"]         = { fg = "#c4b5fd", bg = "rgba(196,181,253,0.14)", bd = "rgba(196,181,253,0.34)" },
   default            = { fg = "#cbd5e1", bg = "rgba(148,163,184,0.15)", bd = "rgba(148,163,184,0.30)" },
 }
 
@@ -297,6 +303,17 @@ local function effectStyle(name)
   local key = tostring(name or ""):lower()
   return icesus.effectStyles[key] or icesus.effectStyles.default
 end
+
+-- Concealment states, shortened for the combat column. Spelled out,
+-- "MOVING SILENTLY" and "HIDING IN SHADOWS" fill the badge row between
+-- them and leave no room for an actual effect; the web client's top bar
+-- wraps and can afford the full words. A state this build has never
+-- heard of falls through and is shown as the server named it.
+local STEALTH_LABEL = {
+  ["moving silently"]   = "silent",
+  ["hiding in shadows"] = "hidden",
+  ["invisible"]         = "invis",
+}
 
 -- =============================================================
 -- Player customisation.
@@ -632,10 +649,13 @@ return {
   },
 
   -- Effect badge colours. fg = text, bg = fill, bd = border. New effect
-  -- names are allowed here, not just the ones the package ships with.
+  -- names are allowed here, not just the ones the package ships with,
+  -- and the concealment badges live here too. Leave a key out to keep
+  -- the shipped value.
   effectStyles = {
     -- poisoned = { fg = "#4ade80", bg = "rgba(74,222,128,0.18)",
     --              bd = "rgba(74,222,128,0.40)" },
+    -- ["hiding in shadows"] = { fg = "#a5b4fc" },
   },
 }
 ]==]
@@ -838,6 +858,7 @@ icesus.state = {
                       wt=0, wtmax=0, vol=0, volmax=0 },
   enemies         = {},
   effects         = {},
+  stealth         = {},     -- concealment the player switched on
   cooldowns       = {},     -- { { name, remaining, total }, ... }
   momentum        = "",
   specialMomentum = "",
@@ -1688,25 +1709,101 @@ function icesus.refreshCasting()
   icesus.hud.castGauge:setValue(0, 1, "—")
 end
 
+-- A badge row is one fixed-width Label that does not wrap: whatever
+-- runs past its right edge is simply not drawn, and the player loses a
+-- badge without being told. So work out how many character cells the
+-- row can show and lay the badges out inside that budget — spacing
+-- first, then the longest names.
+--
+-- The cell width is estimated from the badge font size (Mudlet has no
+-- portable way to measure a string in a Label), deliberately on the
+-- generous side: over-estimating costs a little truncation, and
+-- under-estimating costs a badge.
+local function badgeCells()
+  -- Row width = the column, less the PAD inset setupHUD gives every
+  -- widget in it on each side.
+  local w    = (tonumber(icesus.hudLayout().R) or 360) - 12
+  local size = fsz("badges", 11)
+  return math.max(math.floor(w / (size * 0.88)), 12)
+end
+
+local ELLIPSIS = "\226\128\166"
+
+-- pills: { { raw = "BLEEDING", text = .., cells = .. }, ... }, mutated
+-- in place. Returns the padding and gap that fit, in &nbsp; cells.
+local function fitBadges(pills, cells)
+  local n = #pills
+  if n == 0 then return 2, 3 end
+
+  local function width(pad, gap)
+    local w = (n - 1) * gap
+    for _, p in ipairs(pills) do w = w + p.cells + pad * 2 end
+    return w
+  end
+
+  for _, sp in ipairs({ { 2, 3 }, { 1, 2 }, { 1, 1 } }) do
+    if width(sp[1], sp[2]) <= cells then return sp[1], sp[2] end
+  end
+
+  -- Tightest spacing is still too wide: shave the longest name a
+  -- character at a time, so one long affliction cannot push a short
+  -- badge off the end. Names are never cut below 5 cells; past that
+  -- the row is simply too narrow and the tail is lost as before.
+  while width(1, 1) > cells do
+    local worst, len = nil, 0
+    for _, p in ipairs(pills) do
+      if p.cells > len then worst, len = p, p.cells end
+    end
+    if not worst or len <= 5 then break end
+    worst.cells = len - 1
+    worst.text  = worst.raw:sub(1, worst.cells - 1) .. ELLIPSIS
+  end
+  return 1, 1
+end
+
 function icesus.refreshEffects()
   if not icesus.hud or not icesus.hud.effectsRow then return end
-  local fx = icesus.state.effects
-  if not fx or #fx == 0 then
+  local fx    = icesus.state.effects or {}
+  local sneak = icesus.state.stealth or {}
+  if #fx == 0 and #sneak == 0 then
     icesus.hud.effectsRow:echo(
       [[<center><span style="color:#555">no effects</span></center>]])
     return
   end
+
+  -- Concealment leads the row and keeps its place instead of shuffling
+  -- as afflictions come and go. It can lapse on its own, and the badge
+  -- vanishing is the warning the player is watching for.
+  local pills = {}
+  local function addPill(label, styleName)
+    local raw = tostring(label):upper()
+    pills[#pills + 1] = { raw   = raw,
+                          text  = raw,
+                          cells = #raw,
+                          style = effectStyle(styleName) }
+  end
+  for _, s in ipairs(sneak) do
+    local name = tostring(s)
+    addPill(STEALTH_LABEL[name:lower()] or name, name)
+  end
+  for _, e in ipairs(fx) do addPill(e, e) end
+
+  local n        = #pills
+  local pad, gap = fitBadges(pills, badgeCells())
+  local padStr   = string.rep("&nbsp;", pad)
+  local gapStr   = string.rep("&nbsp;", gap)
+
   -- Qt's HTML-in-QLabel renderer ignores CSS padding/border on inline
   -- spans on this build, so pills are built from literal &nbsp;
   -- whitespace inside a coloured background span. Always works.
   local parts = { [[<center>]] }
-  for i, e in ipairs(fx) do
-    local style = effectStyle(e)
+  for i, p in ipairs(pills) do
+    local label = htmlEscape(p.text):gsub(" ", "&nbsp;")
     table.insert(parts, string.format(
       [[<span style="background:%s;color:%s;font-weight:700">]]
-      .. [[&nbsp;&nbsp;%s&nbsp;&nbsp;</span>]],
-      style.bg, style.fg, htmlEscape(e):upper()))
-    if i < #fx then table.insert(parts, "&nbsp;&nbsp;&nbsp;") end
+      .. [[%s%s%s</span>]],
+      p.style.bg, p.style.fg, padStr, label, padStr))
+    if i < n then table.insert(parts, gapStr) end
   end
   table.insert(parts, [[</center>]])
   icesus.hud.effectsRow:echo(table.concat(parts))
@@ -1906,8 +2003,9 @@ function icesus.onStatus()
   icesus.state.specialMomentum = s.special_momentum or ""
   icesus.refreshMomentum()
 
-  -- effects
+  -- effects, and the concealment the player switched on
   icesus.state.effects = (type(s.effects) == "table") and s.effects or {}
+  icesus.state.stealth = (type(s.stealth) == "table") and s.stealth or {}
   icesus.refreshEffects()
 
   -- Busy state (camping, smelting, fishing, etc.) — a non-spell action

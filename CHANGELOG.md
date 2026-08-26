@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.0.18 — 2026-08-26
+
+- **Concealment badges.** The server now reports what you are hiding
+  behind — moving silently, hiding in shadows, invisible — in
+  `Char.Status.stealth`, the same three states, read from the same
+  queries and in the same order as the `[ shh ]` line of
+  `show effects`. They appear at the head of the effects row as
+  `SILENT` / `HIDDEN` / `INVIS`, in cool colours and without the
+  affliction badges' alarm palette: this is a state you switched on,
+  not something happening to you. It can also lapse on its own, which
+  is the point of showing it — the badge disappearing is the warning.
+  Restyle them from `Icesus.user.lua` like any other badge, under
+  their full names (`["hiding in shadows"] = { fg = ... }`). The web
+  client shows the same three; the short labels are a concession to
+  the narrower combat column. Names this build has never heard of are
+  drawn as the server spells them, so a fourth state needs no update.
+
+- **The effects row stops losing badges off its right edge.** It is a
+  fixed-width label that does not wrap, so anything past the edge was
+  simply not drawn — three badges was already enough to lose one, and
+  concealment made three a normal number. The row now works out how
+  many characters it can show, tightens its spacing, and then shortens
+  the longest names (`BLEED…`) until everything fits. A wider column
+  or a smaller badge font buys back the full names; both are
+  `Icesus.user.lua` settings.
+
 ## v1.0.17 — 2026-08-19
 
 - **Issue #12: rooms piling into "Default Area", and the overlaps that

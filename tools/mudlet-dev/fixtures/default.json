@@ -50,6 +50,7 @@
       "carry_vol":  3200,
       "max_vol":    12000,
       "effects":    ["bleeding", "stunned"],
+      "stealth":    ["moving silently", "hiding in shadows"],
       "enemies": [
         { "name": "an orc warrior",  "hp": 60, "shape": "severely hurt"  },
         { "name": "an orc shaman",   "hp": 90, "shape": "slightly hurt"  },

@@ -67,7 +67,13 @@ being negotiated — make sure GMCP is enabled in your profile settings.
 - **Status effects strip** — colour-coded badges per effect
   (bleeding red, stunned amber, poisoned green, burning orange,
   frozen ice, blessed gold, cursed violet, death-sickness purple,
-  …) from `Char.Status.effects`.
+  …) from `Char.Status.effects`. Concealment you switched on —
+  `SILENT`, `HIDDEN`, `INVIS`, from `Char.Status.stealth` — leads the
+  same row in cool, quiet colours, so a sneak that lapses on its own
+  is something you see go rather than something you find out about.
+  The row tightens its spacing and then shortens the longest names
+  when it fills up, so a badge is never quietly drawn off the edge of
+  the column.
 - **Cooldowns row** — pills with name + seconds, gradient red → cyan →
   green as the cooldown ticks down. Truncates names and drops the
   seconds suffix when many are active so the row never clips.
@@ -346,7 +352,7 @@ return {
 | `fontSizes` | `identity`, `carry`, `exp`, `location`, `mapSave`, `vitals`, `momentum`, `cast`, `badges`, `enemy`, `channels` |
 | `chatStyle` | `time`, `channel`, `tell`, `speech`, `emote`, `talker`, `selfTalker`, `text`, `perChannel` |
 | `palette` | surfaces: `bgDeep`, `bgMain`, `bgPanel`, `bgInput`, `border`, `borderBright` · text: `text`, `textDim`, `textBright` · accents: `ice`, `iceBright`, `iceGlow`, `green`, `red`, `amber`, `cyan` · gauge gradients, each a `{ from, to }` pair: `hpGrad`, `hpGradC` (critical), `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` |
-| `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped |
+| `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped. The concealment badges live here too, under their full server names: `["moving silently"]`, `["hiding in shadows"]`, `["invisible"]` |
 
 Colours are Mudlet colour names in `chatStyle` (`lua showColors()`
 prints every name you can use) and CSS colours in `palette` and

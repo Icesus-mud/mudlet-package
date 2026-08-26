@@ -60,6 +60,7 @@ local function new_world()
     borders   = {},
     miniCfg   = nil,    -- config table of the last MiniConsole built
     fontSizes = {},     -- widget name -> last setFontSize() value
+    labels    = {},     -- widget name -> last echo() body
   }
 
   local function stub(name)
@@ -73,6 +74,12 @@ local function new_world()
         end
         if k == "setFontSize" then
           return function(_, n) w.fontSizes[name] = n end
+        end
+        if k == "echo" then
+          return function(self2, s)
+            w.labels[name] = tostring(s)
+            return self2
+          end
         end
         if k == "cecho" then
           return function(_, s)
@@ -707,6 +714,183 @@ do
   icesus.hudCommand("wat")
   check("an unknown subcommand is refused", saw(w.echoes, "no such HUD command"),
     joined(w.echoes))
+end
+
+-- ================================================================
+print("Concealment badges (Char.Status \"stealth\")")
+-- ================================================================
+
+-- Feed one Char.Status through the real handler and hand back what the
+-- effects row was told to render.
+local function statusRow(icesus, w, status)
+  w.env.gmcp = { Char = { Status = status } }
+  icesus.onStatus()
+  return w.labels["icesus.effectsRow"] or ""
+end
+
+do
+  local icesus, w = load_icesus()
+  check("an empty row still says so",
+    statusRow(icesus, w, {}):find("no effects", 1, true) ~= nil,
+    w.labels["icesus.effectsRow"])
+
+  local row = statusRow(icesus, w, { stealth = { "moving silently" } })
+  check("concealment alone lights the row up",
+    row:find("no effects", 1, true) == nil, row)
+  check("`moving silently` is shortened to SILENT",
+    row:find("SILENT", 1, true) ~= nil, row)
+  check("the long form is not what gets drawn",
+    row:find("MOVING", 1, true) == nil, row)
+  check("it wears its own colour, not the default grey",
+    row:find("rgba(148,163,184,0.14)", 1, true) ~= nil, row)
+
+  row = statusRow(icesus, w, { stealth = { "hiding in shadows", "invisible" } })
+  check("`hiding in shadows` is shortened to HIDDEN",
+    row:find("HIDDEN", 1, true) ~= nil, row)
+  check("`invisible` is shortened to INVIS",
+    row:find("INVIS", 1, true) ~= nil, row)
+
+  row = statusRow(icesus, w, { stealth = { "wrapped in fog" } })
+  check("an unknown state is shown as the server named it",
+    row:find("WRAPPED&nbsp;IN&nbsp;FOG", 1, true) ~= nil, row)
+end
+
+do
+  local icesus, w = load_icesus()
+  local row = statusRow(icesus, w,
+    { stealth = { "invisible" }, effects = { "bleeding" } })
+  check("concealment is drawn ahead of afflictions",
+    row:find("INVIS", 1, true) < row:find("BLEEDING", 1, true), row)
+
+  row = statusRow(icesus, w, { effects = { "bleeding" } })
+  check("dropping concealment leaves the affliction behind",
+    row:find("INVIS", 1, true) == nil and row:find("BLEEDING", 1, true) ~= nil,
+    row)
+
+  row = statusRow(icesus, w, {})
+  check("a status with neither field clears the row",
+    row:find("no effects", 1, true) ~= nil, row)
+end
+
+do
+  -- A server too old to send the field, and a server sending junk.
+  local icesus, w = load_icesus()
+  statusRow(icesus, w, { stealth = { "invisible" } })
+  local row = statusRow(icesus, w, { effects = {} })
+  check("a status with no stealth key drops the badge",
+    row:find("no effects", 1, true) ~= nil, row)
+
+  row = statusRow(icesus, w, { stealth = "invisible" })
+  check("a non-table stealth field is ignored, not rendered",
+    row:find("no effects", 1, true) ~= nil, row)
+  check("state.stealth stays a table", type(icesus.state.stealth) == "table")
+end
+
+do
+  local icesus, w = load_icesus({ user = [==[
+return {
+  effectStyles = { ["hiding in shadows"] = { fg = "#ff00ff" } },
+}
+]==] })
+  local row = statusRow(icesus, w, { stealth = { "hiding in shadows" } })
+  check("a player can restyle a concealment badge",
+    row:find("#ff00ff", 1, true) ~= nil, row)
+  check("the keys it did not name keep the shipped value",
+    icesus.effectStyles["hiding in shadows"].bg == "rgba(165,180,252,0.14)",
+    icesus.effectStyles["hiding in shadows"].bg)
+end
+
+-- ================================================================
+print("Badge rows fit the column they are drawn in")
+-- ================================================================
+
+-- Character cells the rendered row asks for: badge text plus every
+-- &nbsp; between and around the pills. The Label does not wrap, so
+-- anything past the budget is drawn off the edge and lost.
+local function rowCells(html)
+  local body = html:gsub("^<center>", ""):gsub("</center>$", "")
+  body = body:gsub("<[^>]->", "")          -- drop the span tags
+  local n = 0
+  for _ in body:gmatch("&nbsp;") do n = n + 1 end
+  body = body:gsub("&nbsp;", "")
+  -- The ellipsis is three bytes wide and one character wide.
+  for _ in body:gmatch("\226\128\166") do n = n + 1 end
+  body = body:gsub("\226\128\166", "")
+  return n + #body
+end
+
+do
+  local icesus, w = load_icesus()
+  local budget = math.floor((360 - 12) / (11 * 0.88))
+
+  local roomy = statusRow(icesus, w, { stealth = { "invisible" } })
+  check("a roomy row keeps its wide padding",
+    roomy:find("&nbsp;&nbsp;INVIS&nbsp;&nbsp;", 1, true) ~= nil, roomy)
+  check("a roomy row is nowhere near the budget",
+    rowCells(roomy) < budget, tostring(rowCells(roomy)))
+
+  local tight = statusRow(icesus, w,
+    { stealth = { "moving silently" }, effects = { "bleeding", "stunned" } })
+  check("three badges tighten the spacing instead of clipping",
+    rowCells(tight) <= budget, tostring(rowCells(tight)))
+  check("three badges keep their full names",
+    tight:find("BLEEDING", 1, true) ~= nil and tight:find("STUNNED", 1, true) ~= nil,
+    tight)
+
+  local full = statusRow(icesus, w, {
+    stealth = { "moving silently", "hiding in shadows" },
+    effects = { "bleeding", "stunned" },
+  })
+  check("four badges still fit the column", rowCells(full) <= budget,
+    tostring(rowCells(full)))
+  check("the long name is the one that gets shaved",
+    full:find("BLEE", 1, true) ~= nil and full:find("BLEEDING", 1, true) == nil,
+    full)
+  check("a shaved name says so with an ellipsis",
+    full:find("\226\128\166", 1, true) ~= nil, full)
+  check("the short badges are left alone",
+    full:find("SILENT", 1, true) ~= nil and full:find("HIDDEN", 1, true) ~= nil,
+    full)
+
+  -- Truncation runs off the full name every time, never off an
+  -- already-shaved one — that would cut into the ellipsis bytes.
+  check("no badge is cut mid-ellipsis",
+    full:find("\226\128\166\226\128\166", 1, true) == nil, full)
+end
+
+do
+  -- A wider column earns back the full names; a narrower one gives up
+  -- more of them. Both come from icesus.hudLayout(), so `hud` settings
+  -- and Icesus.user.lua reach this for free.
+  local icesus, w = load_icesus({ user = "return { config = { borderRight = 620 } }" })
+  local row = statusRow(icesus, w, {
+    stealth = { "moving silently", "hiding in shadows" },
+    effects = { "bleeding", "stunned" },
+  })
+  check("a wide column keeps every name intact",
+    row:find("BLEEDING", 1, true) ~= nil and row:find("STUNNED", 1, true) ~= nil,
+    row)
+  check("a wide column keeps the wide padding",
+    row:find("&nbsp;&nbsp;SILENT&nbsp;&nbsp;", 1, true) ~= nil, row)
+end
+
+do
+  -- A badge font this big cannot fit three names in a 360px column at
+  -- any spacing. The row gives up its names rather than its badges:
+  -- a truncated word still tells the player the effect is on.
+  local icesus, w = load_icesus({ user = "return { fontSizes = { badges = 20 } }" })
+  local status = { stealth = { "moving silently" },
+                   effects = { "bleeding", "stunned" } }
+  local big = statusRow(icesus, w, status)
+  check("a bigger badge font shaves names the default size keeps",
+    big:find("BLEEDING", 1, true) == nil, big)
+  check("every badge survives the shaving",
+    big:find("SILE", 1, true) ~= nil and big:find("BLEE", 1, true) ~= nil
+      and big:find("STUN", 1, true) ~= nil, big)
+
+  local ic2, w2 = load_icesus()
+  check("the default size keeps the same three names whole",
+    statusRow(ic2, w2, status):find("BLEEDING", 1, true) ~= nil)
 end
 
 -- ================================================================
