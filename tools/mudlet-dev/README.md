@@ -38,7 +38,19 @@ This:
    `~/mudlet-bin/Mudlet.AppImage`.
 
 Re-running the script is safe — it skips packages and downloads that
-are already present.
+are already present. That also means it never *updates* Mudlet: to
+pull a newer release over the top of the one you have, run it as
+`MUDLET_UPDATE=1 ./tools/mudlet-dev/install.sh`. Worth doing whenever
+Mudlet ships a release, since a screenshot only proves the package
+works on the build sitting in `~/mudlet-bin`. Currently on **4.22.0**
+(2026-07-06).
+
+`run.sh` writes three keys into `~/.config/mudlet/Mudlet.ini` before
+launching, to settle first-run dialogs that would otherwise cover the
+HUD: Mudlet 4.22.0 asks whether it should own `telnet://` links (it
+checks with `xdg-mime`, which a server does not have, so it asks every
+time), and the updater pops an error box when its self-download
+fails. Both are answered the way a throwaway headless run wants.
 
 ## Per-iteration workflow
 

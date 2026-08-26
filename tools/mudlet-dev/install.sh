@@ -35,9 +35,13 @@ else
   echo "All apt dependencies already installed."
 fi
 
-# Mudlet AppImage
+# Mudlet AppImage. Only fetched when missing — set MUDLET_UPDATE=1 to
+# pull the current release over the top of an older one. Worth doing
+# when a new Mudlet ships: run.sh only proves the package works on the
+# build sitting here, and 4.22.0 arrived with a first-run dialog that
+# broke the harness until run.sh learned to answer it.
 MUDLET_BIN="$HOME/mudlet-bin/Mudlet.AppImage"
-if [[ ! -x "$MUDLET_BIN" ]]; then
+if [[ ! -x "$MUDLET_BIN" || -n "${MUDLET_UPDATE:-}" ]]; then
   echo "Downloading Mudlet AppImage..."
   mkdir -p "$(dirname "$MUDLET_BIN")"
   url=$(curl -sL https://api.github.com/repos/Mudlet/Mudlet/releases/latest \
@@ -59,7 +63,7 @@ for a in r.get("assets", []):
   chmod +x "$MUDLET_BIN"
   echo "Installed Mudlet to $MUDLET_BIN"
 else
-  echo "Mudlet AppImage already at $MUDLET_BIN"
+  echo "Mudlet AppImage already at $MUDLET_BIN (MUDLET_UPDATE=1 to refresh it)"
 fi
 
 "$MUDLET_BIN" --version 2>&1 | head -1 || true

@@ -175,6 +175,45 @@ if [[ -n "${ICESUS_CUSTOM_FILE:-}" ]]; then
 fi
 
 # -----------------------------------------------------------------
+# Mudlet's own settings live outside the profile, so the wipe above
+# does not reach them. Two first-run dialogs otherwise sit on top of
+# the HUD and make the screenshot worthless:
+#
+#   * 4.22.0 asks whether Mudlet should take over telnet:// links. It
+#     decides by shelling out to xdg-mime, and a headless server has
+#     none — which counts as "somebody else owns them", so the prompt
+#     comes up on every run.
+#   * the updater downloads new releases by itself and puts an error
+#     box on screen when that download fails.
+#
+# Answer both the way a throwaway headless run would.
+# -----------------------------------------------------------------
+MUDLET_INI="${MUDLET_CONFIG_DIR:-$HOME/.config/mudlet}/Mudlet.ini"
+mkdir -p "$(dirname "$MUDLET_INI")"
+python3 - "$MUDLET_INI" <<'INI_PY'
+import configparser, sys
+
+path = sys.argv[1]
+# Raw: QSettings values are full of % and @ that interpolation chokes on.
+cp = configparser.RawConfigParser()
+cp.optionxform = str          # QSettings keys are case-sensitive
+cp.read(path)
+for section, keys in (
+    ("General", { "telnetHandlerAsked":   "true",
+                  "telnetHandlerEnabled": "false",
+                  "telnetHandlerDontAsk": "true" }),
+    ("DBLSQD",  { "autoDownload": "false" }),
+):
+    if not cp.has_section(section):
+        cp.add_section(section)
+    for key, value in keys.items():
+        cp.set(section, key, value)
+with open(path, "w") as fh:
+    cp.write(fh, space_around_delimiters=False)
+INI_PY
+echo "Settled Mudlet's first-run prompts in $MUDLET_INI"
+
+# -----------------------------------------------------------------
 # launch Mudlet with the package as install argument
 # -----------------------------------------------------------------
 LOG="$WORKDIR/mudlet.log"
