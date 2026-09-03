@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.20 — 2026-09-03
+
+- **Special exits now reach rooms mapped before v1.0.19.** That release
+  drew special exits only during a full rebuild of a room, and the
+  mapper skips the rebuild whenever a room's stored signature — name,
+  area, exits, coords, terrain — is unchanged, which a package upgrade
+  never changes. So a shop entrance walked past under an older package
+  stayed undrawn until the room itself changed or the map was reset.
+  The signature of a room with a special exit now carries a marker, so
+  each such room misses the fast path exactly once and gets its exits
+  drawn on the next visit. Rooms without special exits keep their
+  signature and are not rebuilt.
+
 ## v1.0.19 — 2026-09-03
 
 - **Guild resources reach the HUD.** The server now sends the scalar a
