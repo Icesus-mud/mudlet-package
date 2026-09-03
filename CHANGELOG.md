@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.0.19 — 2026-09-03
 
 - **Guild resources reach the HUD.** The server now sends the scalar a
   guild runs on — fury for firepriests, vitae for scions and water
