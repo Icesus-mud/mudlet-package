@@ -124,10 +124,28 @@ mud.setExit = function(id, dest, dir)
   if dest == -1 then rooms[id].exits[dir] = nil else rooms[id].exits[dir] = dest end
 end
 mud.setExitStub      = function(id, dir, b) bump("setExitStub") end
-mud.setSpecialExit   = function(id, dest, cmd) bump("setSpecialExit"); if rooms[id] then rooms[id].special[cmd] = dest end end
+-- Mudlet exposes addSpecialExit, and never a setSpecialExit — see
+-- src/lua-function-list.json. Mocking the name we wished for is what let
+-- issue #13 sit undetected: the suite passed against a function that does
+-- not exist, while the real client dropped every special exit.
+mud.addSpecialExit   = function(id, dest, cmd) bump("addSpecialExit"); if rooms[id] then rooms[id].special[cmd] = dest end end
 mud.clearSpecialExits = function(id) bump("clearSpecialExits"); if rooms[id] then rooms[id].special = {} end end
 mud.getRoomExits     = function(id) return rooms[id] and rooms[id].exits or {} end
-mud.getSpecialExits  = function(id) return rooms[id] and rooms[id].special or {} end
+-- Mudlet's getSpecialExits is keyed by DESTINATION room id, with a
+-- {command = lockFlag} table under each; getSpecialExitsSwap is the one
+-- keyed by command. Modelling only the convenient shape is how the prune
+-- path came to read room ids as though they were exit commands.
+mud.getSpecialExits = function(id)
+  local out = {}
+  if rooms[id] then
+    for cmd, dest in pairs(rooms[id].special) do
+      out[dest] = out[dest] or {}
+      out[dest][cmd] = "0"
+    end
+  end
+  return out
+end
+mud.getSpecialExitsSwap = function(id) return rooms[id] and rooms[id].special or {} end
 mud.centerview       = function(id) bump("centerview") end
 mud.updateMap        = function() bump("updateMap") end
 mud.deleteRoom       = function(id) bump("deleteRoom"); rooms[id] = nil end
@@ -1492,6 +1510,74 @@ do
     table.concat(second, ","))
 end
 
+
+
+-- ================================================================
+-- Issue #13: special exits are drawn through addSpecialExit.
+-- Mudlet has never exposed a setSpecialExit, so the old name resolved
+-- to nil inside its pcall and every special exit was dropped without
+-- a word. Both the placement path and the prune/rebuild path are
+-- covered, because each called it separately.
+-- ================================================================
+do
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  icesus.mapper.onRoomInfo(roominfo("shop0001",
+    { area = "Vaerlon",
+      exits = { north = "road0001", ["enter shop"] = "insid001" } }))
+  local m = icesus.mapper.idMap
+  local roomId = m.idToRoom["shop0001"]
+  local destId = m.idToRoom["insid001"]
+
+  check("the special exit's destination room is created", destId ~= nil)
+  check("'enter shop' is drawn as a special exit",
+    roomId and destId and rooms[roomId].special["enter shop"] == destId,
+    roomId and tostring(rooms[roomId].special["enter shop"]) or "no room")
+  check("a cardinal exit in the same room still goes through setExit",
+    roomId and rooms[roomId].exits["north"] ~= nil)
+
+  -- Same room, different special exit: the prune path clears the old
+  -- set and rebuilds it, which is the second call site.
+  icesus.mapper.onRoomInfo(roominfo("shop0001",
+    { area = "Vaerlon",
+      exits = { north = "road0001", ["enter cellar"] = "cell0001" } }))
+  check("a special exit that vanished is pruned",
+    rooms[roomId].special["enter shop"] == nil,
+    tostring(rooms[roomId].special["enter shop"]))
+  check("the replacement special exit is redrawn by the prune path",
+    rooms[roomId].special["enter cellar"] == m.idToRoom["cell0001"],
+    tostring(rooms[roomId].special["enter cellar"]))
+
+  -- Revisiting with the same exits must not touch the map. The prune
+  -- check reads Mudlet's own record of the room, so it has to read it
+  -- in the shape Mudlet returns: getSpecialExits is keyed by
+  -- destination room id, and comparing those keys against command
+  -- names never matches, which rebuilt every special exit on every
+  -- single revisit and marked the map dirty each time.
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("shop0001",
+    { area = "Vaerlon",
+      exits = { north = "road0001", ["enter cellar"] = "cell0001" } }))
+  check("an unchanged special exit is not cleared and rebuilt",
+    (calls.clearSpecialExits or 0) == 0,
+    "clearSpecialExits=" .. tostring(calls.clearSpecialExits or 0))
+  check("and it is still on the room afterwards",
+    rooms[roomId].special["enter cellar"] == m.idToRoom["cell0001"])
+
+  -- The revisit above took the fast path, which skips the exit work
+  -- wholesale. The prune check only runs inside a full rebuild, so to
+  -- exercise it the signature has to change while the special exits
+  -- stay put — a renamed room, say.
+  calls = {}
+  icesus.mapper.onRoomInfo(roominfo("shop0001",
+    { name = "The Rebuilt Shop", area = "Vaerlon",
+      exits = { north = "road0001", ["enter cellar"] = "cell0001" } }))
+  check("a full rebuild leaves unchanged special exits alone",
+    (calls.clearSpecialExits or 0) == 0,
+    "clearSpecialExits=" .. tostring(calls.clearSpecialExits or 0))
+  check("the special exit survives the rebuild",
+    rooms[roomId].special["enter cellar"] == m.idToRoom["cell0001"])
+end
 
 print(string.format("\n%d/%d checks passed, %d failed", total - failures, total, failures))
 os.exit(failures == 0 and 0 or 1)

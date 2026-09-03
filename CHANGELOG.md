@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Special exits are drawn at last.** The mapper asked Mudlet for
+  `setSpecialExit`, a function Mudlet has never had — the special-exit
+  family is `addSpecialExit`. Both call sites were wrapped in `pcall`,
+  so the missing function raised nothing and the mapper carried on:
+  every `enter shop`, `climb ladder` and `enter cave` has been silently
+  dropped for as long as the mapper has existed. Reported by Direkein.
+- **Rooms with special exits stop being rebuilt on every pass.** The
+  prune step read the room's current special exits with
+  `getSpecialExits`, which is keyed by destination room id and puts the
+  commands in a table underneath. Comparing those keys against command
+  names never matched, so a rebuild always concluded that everything
+  had vanished and cleared and re-added the lot. It now reads
+  `getSpecialExitsSwap`, which is the command-keyed one. This never
+  bit anyone before, because there were no special exits to rebuild.
+
 ## v1.0.18 — 2026-08-26
 
 - **Concealment badges.** The server now reports what you are hiding

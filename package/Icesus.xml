@@ -2147,7 +2147,7 @@ end
 -- The server ships room.id (8-char hex), exits (dir -> 8-char hash
 -- of destination, or 0 for shrouded/dynamic), and optionally coords
 -- for outworld grid rooms. We translate that into Mudlet's integer
--- roomID space and call addRoom / setExit / setSpecialExit /
+-- roomID space and call addRoom / setExit / addSpecialExit /
 -- setRoomCoordinates so the F11 mapper view populates as the
 -- player walks. Mapper-hostile rooms (server omits id) are
 -- skipped — they stay invisible to the map.
@@ -2935,7 +2935,7 @@ function icesus.mapper.onRoomInfo(r)
   -- of 0 means shrouded / unknown destination (still plot the
   -- direction stub so the player sees the option). Cardinal exits
   -- go through setExit, anything else (e.g. "enter shop") through
-  -- setSpecialExit.
+  -- addSpecialExit.
   local exits = r.exits
   if type(exits) == "table" then
     -- Track what's still live so we can prune disappeared exits.
@@ -3000,7 +3000,7 @@ function icesus.mapper.onRoomInfo(r)
           liveSpecials[dir] = true
           if destHash and (not roadsOnly or m.idToRoom[destHash]) then
             local destId, destNew = ensureRoom(destHash)
-            pcall(setSpecialExit, roomId, destId, dir)
+            pcall(addSpecialExit, roomId, destId, dir)
             if destNew and isOutworld and areaId and areaId > 0 then
               pcall(setRoomArea, destId, areaId)
             end
@@ -3022,8 +3022,13 @@ function icesus.mapper.onRoomInfo(r)
       end
     end
     -- Prune special exits we placed earlier that are now gone.
-    if clearSpecialExits and getSpecialExits then
-      local ok, existing = pcall(getSpecialExits, roomId)
+    -- getSpecialExitsSwap, not getSpecialExits: the latter is keyed by
+    -- destination room id, with the commands in a table underneath, so
+    -- comparing its keys against command names never matched and every
+    -- rebuild cleared and re-added the lot. The swap variant is the one
+    -- keyed by command, which is what liveSpecials holds.
+    if clearSpecialExits and getSpecialExitsSwap then
+      local ok, existing = pcall(getSpecialExitsSwap, roomId)
       if ok and type(existing) == "table" then
         local needRebuild = false
         for cmd in pairs(existing) do
@@ -3036,7 +3041,7 @@ function icesus.mapper.onRoomInfo(r)
             if destHash and destHash ~= "0"
                and (not roadsOnly or m.idToRoom[destHash]) then
               local destId, destNew = ensureRoom(destHash)
-              pcall(setSpecialExit, roomId, destId, cmd)
+              pcall(addSpecialExit, roomId, destId, cmd)
               if destNew and isOutworld and areaId and areaId > 0 then
                 pcall(setRoomArea, destId, areaId)
               end
