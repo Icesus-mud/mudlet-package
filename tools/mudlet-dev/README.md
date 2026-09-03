@@ -188,10 +188,12 @@ live game, use a dedicated test character or a dev-server slot.
 - **Mudlet starts but the screenshot is blank** — bump `WAIT_SECONDS`
   to 12+. Mudlet's first launch on a fresh profile auto-installs `mpkg`
   which can take a few seconds.
-- **Screenshot has only the menu bar** — Mudlet didn't honour
-  `--fullscreen`. The window is at its default size in the top-left.
-  Workable but ugly. We can either `xdotool` to maximise, or save a
-  `geometry` setting in the profile XML on first launch.
+- **Screenshot has only the menu bar, or a 750×498 window in the
+  top-left** — Mudlet doesn't honour `--fullscreen`. Fake mode asks for
+  the Xvfb screen size from inside instead (`setMainWindowSize` in the
+  injected `icesus.fakeconnect` script, from `XVFB_GEOMETRY`), so its
+  screenshots show the HUD at a desktop width. Dev mode has no injected
+  script and still gets the default window.
 - **`mInstalledPackages` is empty after launch** — Mudlet sometimes
   loses package state on ungraceful shutdown. The harness installs
   fresh on every run for exactly this reason.

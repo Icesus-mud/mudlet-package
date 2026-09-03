@@ -97,9 +97,13 @@ if [[ "$MODE" == "fake" ]]; then
   # auto-connect script into a fake-flavoured copy so the HUD dials the
   # fake_server on profile load. Real package on disk is untouched.
   PKG="$REPO_ROOT/dist/Icesus-fake.mpackage"
-  python3 - "$REPO_ROOT/package" "$PKG" "$FAKE_PORT" <<'PY'
+  python3 - "$REPO_ROOT/package" "$PKG" "$FAKE_PORT" "$XVFB_GEOMETRY" <<'PY'
 import os, re, sys, zipfile
 src, out, port = sys.argv[1], sys.argv[2], sys.argv[3]
+# --fullscreen leaves the window at 750x498 whatever Xvfb's screen is,
+# which squeezes the HUD into a shape no player sees. Ask Mudlet for
+# the screen size from inside instead.
+geom_w, geom_h = sys.argv[4].split("x")[:2]
 xml_path = os.path.join(src, "Icesus.xml")
 with open(xml_path) as fh:
     xml = fh.read()
@@ -119,6 +123,7 @@ inject = f"""
 local connected = false
 registerAnonymousEventHandler("sysConnectionEvent", function() connected = true end)
 tempTimer(0.5, function()
+  pcall(setMainWindowSize, {geom_w}, {geom_h})
   if connected then return end
   cecho("\\n<grey>[fakeconnect] dialing 127.0.0.1:{port}<reset>\\n")
   connectToServer("127.0.0.1", {port})
