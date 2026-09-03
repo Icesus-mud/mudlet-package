@@ -61,6 +61,12 @@ local function new_world()
     miniCfg   = nil,    -- config table of the last MiniConsole built
     fontSizes = {},     -- widget name -> last setFontSize() value
     labels    = {},     -- widget name -> last echo() body
+    tooltips  = {},     -- widget name -> last setToolTip() text
+    visible   = {},     -- widget name -> true after show(), false after hide()
+    sizes     = {},     -- widget name -> { width, height } from resize()
+    pos       = {},     -- widget name -> { x, y } from move()
+    clicks    = {},     -- widget name -> setClickCallback() function
+    gmcp      = {},     -- sendGMCP() payloads
   }
 
   local function stub(name)
@@ -74,6 +80,24 @@ local function new_world()
         end
         if k == "setFontSize" then
           return function(_, n) w.fontSizes[name] = n end
+        end
+        if k == "setToolTip" then
+          return function(self2, s) w.tooltips[name] = tostring(s or ""); return self2 end
+        end
+        if k == "hide" then
+          return function(self2) w.visible[name] = false; return self2 end
+        end
+        if k == "show" then
+          return function(self2) w.visible[name] = true; return self2 end
+        end
+        if k == "resize" then
+          return function(self2, wd, ht) w.sizes[name] = { wd, ht }; return self2 end
+        end
+        if k == "move" then
+          return function(self2, x, y) w.pos[name] = { x, y }; return self2 end
+        end
+        if k == "setClickCallback" then
+          return function(self2, fn) w.clicks[name] = fn; return self2 end
         end
         if k == "echo" then
           return function(self2, s)
@@ -107,7 +131,7 @@ local function new_world()
   mud.getPackages      = function() return {} end
   mud.getMainWindowSize = function() return 1600, 900 end
   mud.isConnected      = function() return false end
-  mud.sendGMCP         = function() end
+  mud.sendGMCP         = function(s) w.gmcp[#w.gmcp + 1] = tostring(s) end
   mud.uninstallPackage = function() end
   mud.installPackage   = function() end
   mud.downloadFile     = function() end
@@ -635,6 +659,8 @@ do
   icesus.hudCommand("example")
   local path = HOME .. "/Icesus.user.lua"
   check("`hud example` wrote the starter file", w.mud.io.exists(path))
+  check("the starter file mentions guildStyles",
+    w.mud.io.exists(path) and read_file(path):find("guildStyles", 1, true) ~= nil)
   local body = read_file(path)
   check("the starter file is valid Lua returning a table",
     type(assert(loadfile(path))()) == "table")
@@ -891,6 +917,368 @@ do
   local ic2, w2 = load_icesus()
   check("the default size keeps the same three names whole",
     statusRow(ic2, w2, status):find("BLEEDING", 1, true) ~= nil)
+end
+
+-- ================================================================
+print("Guild resources (Char.Vitals scalars + Char.Resources)")
+-- ================================================================
+
+local plainVitals = { hp = 100, mana = 50, moves = 20, psp = 0,
+                      maxhp = 200, maxmana = 80, maxmoves = 40, maxpsp = 0 }
+
+local function withKeys(base, extra)
+  local t = {}
+  for k, v in pairs(base) do t[k] = v end
+  for k, v in pairs(extra or {}) do t[k] = v end
+  return t
+end
+
+local function feedVitals(icesus, w, vitals)
+  w.env.gmcp = w.env.gmcp or {}
+  w.env.gmcp.Char = w.env.gmcp.Char or {}
+  w.env.gmcp.Char.Vitals = vitals
+  icesus.onVitals()
+  return w.labels["icesus.guildStrip"] or ""
+end
+
+local function feedResources(icesus, w, res)
+  w.env.gmcp = w.env.gmcp or {}
+  w.env.gmcp.Char = w.env.gmcp.Char or {}
+  w.env.gmcp.Char.Resources = res
+  if icesus.onResources then icesus.onResources() end
+  return w.labels["icesus.guildStrip"] or ""
+end
+
+-- Real payloads, captured from live characters on 2026-08-29 and pinned
+-- in the web client's tests/hud-guild-resources.test.js. Both are
+-- charm+piety characters, the common case; the templar bonds are the
+-- synthetic set the web client uses for the same reason (no templar
+-- was online with a post-deploy user object).
+local liveArthr = {
+  charms = {
+    abilities = { ["archery damage"] = 5, ["exp rate"] = 1, ["shoot cost"] = 5,
+                  ["reload cost"] = 5, fletchery = 1, ["fire-brand"] = 1 },
+    desc = "combat",
+  },
+  piety = { earth = 19, nether = 0, water = 6, spirits = 0, ancestors = 0,
+            aetheria = 0, air = 0, ["nameless king"] = 0, fire = 1 },
+}
+local liveBonds = {
+  air   = { strength = 1420, load = 12, drain = 8 },
+  water = { strength = 980,  load = 0,  drain = -3 },
+  fire  = { strength = 500,  load = 4,  drain = 0 },
+  earth = { strength = 1100, load = 9,  drain = 2 },
+}
+local liveAbu = {
+  charms = {
+    abilities = { ["drain bonus"] = 5, ["psi power"] = 5,
+                  ["spell impulse chance"] = 5, ["channeling damage"] = 5,
+                  ["psp cost"] = 5 },
+    desc = "psii",
+  },
+  piety = { earth = 0, nether = 0, water = 0, spirits = 0, ancestors = 5041,
+            aetheria = 4288, air = 14033, ["nameless king"] = 0, fire = 3005 },
+}
+
+local UP, DOWN = "\226\150\178", "\226\150\188"   -- U+25B2 / U+25BC
+
+do
+  local icesus, w = load_icesus()
+  feedVitals(icesus, w, plainVitals)
+  check("no strip for a character with no guild resource",
+    w.visible["icesus.guildStrip"] == false, tostring(w.visible["icesus.guildStrip"]))
+  check("the gauges keep the whole row while the strip is hidden",
+    w.sizes["icesus.bottom"] == nil or w.sizes["icesus.bottom"][1] == "100%-360",
+    w.sizes["icesus.bottom"] and tostring(w.sizes["icesus.bottom"][1]))
+
+  local strip = feedVitals(icesus, w, withKeys(plainVitals, { fury = 0 }))
+  check("a firepriest at empty reads Fury 0, not a blank",
+    strip:find("Fury", 1, true) ~= nil and strip:find(">0<", 1, true) ~= nil, strip)
+  check("the strip is shown for a firepriest",
+    w.visible["icesus.guildStrip"] == true)
+  local fw = w.sizes["icesus.guildStrip"] and w.sizes["icesus.guildStrip"][1]
+  check("the strip has a width", type(fw) == "number" and fw > 0, tostring(fw))
+  check("the gauge row gives up exactly the strip's width",
+    w.sizes["icesus.bottom"] and w.sizes["icesus.bottom"][1] == "100%-" .. (360 + (fw or 0)),
+    w.sizes["icesus.bottom"] and tostring(w.sizes["icesus.bottom"][1]))
+  check("the strip sits at the right end of the vitals row",
+    w.pos["icesus.guildStrip"] and w.pos["icesus.guildStrip"][1] == "-" .. (360 + (fw or 0)),
+    w.pos["icesus.guildStrip"] and tostring(w.pos["icesus.guildStrip"][1]))
+
+  strip = feedVitals(icesus, w, withKeys(plainVitals, { fury = 42 }))
+  check("fury moves with the packet", strip:find(">42<", 1, true) ~= nil, strip)
+
+  strip = feedVitals(icesus, w, withKeys(plainVitals, { mlight = 7 }))
+  check("an unknown scalar key is drawn as a guild resource",
+    strip:find("Mlight", 1, true) ~= nil and strip:find(">7<", 1, true) ~= nil, strip)
+
+  feedVitals(icesus, w, plainVitals)
+  check("losing the resource removes the strip -- no ghost Fury",
+    w.visible["icesus.guildStrip"] == false)
+  check("the gauge row takes the space back",
+    w.sizes["icesus.bottom"] and w.sizes["icesus.bottom"][1] == "100%-360",
+    w.sizes["icesus.bottom"] and tostring(w.sizes["icesus.bottom"][1]))
+end
+
+do
+  local icesus, w = load_icesus()
+  feedVitals(icesus, w, withKeys(plainVitals, { fury = 42 }))
+  local fw = w.sizes["icesus.guildStrip"] and w.sizes["icesus.guildStrip"][1] or 0
+  feedVitals(icesus, w, plainVitals)
+
+  local strip = feedResources(icesus, w, { bonds = liveBonds })
+  local a, wa, f, e = strip:find("Air", 1, true), strip:find("Water", 1, true),
+                      strip:find("Fire", 1, true), strip:find("Earth", 1, true)
+  check("four bond chips in the in-game order, air first",
+    a and wa and f and e and a < wa and wa < f and f < e, strip)
+  check("bond strength prints in full, not as 1.4k",
+    strip:find("1420", 1, true) ~= nil and strip:find("1.4k", 1, true) == nil, strip)
+  check("a filling bond points up", strip:find(UP, 1, true) ~= nil, strip)
+  check("a draining bond points down", strip:find(DOWN, 1, true) ~= nil, strip)
+  check("a steady bond has no arrow",
+    select(2, strip:gsub(UP, "")) + select(2, strip:gsub(DOWN, "")) == 3, strip)
+  check("load and drain stay out of the strip",
+    strip:find("load", 1, true) == nil and strip:find("drain", 1, true) == nil, strip)
+  local bw = w.sizes["icesus.guildStrip"] and w.sizes["icesus.guildStrip"][1] or 0
+  check("four bonds get a wider strip than one scalar", bw > fw,
+    string.format("bonds=%s fury=%s", tostring(bw), tostring(fw)))
+
+  strip = feedResources(icesus, w, {
+    souls  = { warrior = 4, beast = 9, mage = 2 },
+    charms = { desc = "a small bone charm",
+               abilities = { luck = 12, regeneration = 8 } },
+  })
+  check("souls stay out of the strip",
+    strip:find("beast", 1, true) == nil and strip:find("warrior", 1, true) == nil, strip)
+  check("the charm chip names the collection",
+    strip:find("Charm", 1, true) ~= nil
+      and strip:find("a small bone charm", 1, true) ~= nil, strip)
+  check("the carry summary says it opens the detail",
+    (w.tooltips["icesus.carryLabel"] or ""):find("devotion", 1, true) ~= nil,
+    w.tooltips["icesus.carryLabel"])
+
+  feedResources(icesus, w, {})
+  check("an empty Char.Resources clears the strip",
+    w.visible["icesus.guildStrip"] == false)
+  check("and the carry summary stops advertising a detail",
+    (w.tooltips["icesus.carryLabel"] or ""):find("devotion", 1, true) == nil,
+    w.tooltips["icesus.carryLabel"])
+end
+
+do
+  local icesus, w = load_icesus({ settings = { hudSide = "left" } })
+  feedVitals(icesus, w, withKeys(plainVitals, { fury = 5 }))
+  local fw = w.sizes["icesus.guildStrip"] and w.sizes["icesus.guildStrip"][1] or 0
+  check("with the column on the left the strip hugs the window's right edge",
+    w.pos["icesus.guildStrip"] and w.pos["icesus.guildStrip"][1] == "-" .. fw,
+    w.pos["icesus.guildStrip"] and tostring(w.pos["icesus.guildStrip"][1]))
+  check("and the gauge row still gives up only the strip's width",
+    w.sizes["icesus.bottom"] and w.sizes["icesus.bottom"][1] == "100%-" .. (360 + fw),
+    w.sizes["icesus.bottom"] and tostring(w.sizes["icesus.bottom"][1]))
+end
+
+do
+  -- A 1000 px window leaves 640 px beside the column. The strip may
+  -- take half of that; the gauges keep the rest.
+  local icesus, w = load_icesus()
+  w.mud.getMainWindowSize = function() return 1000, 700 end
+  feedVitals(icesus, w, plainVitals)
+  local strip = feedResources(icesus, w, { bonds = liveBonds,
+    charms = { desc = "combat", abilities = { fletchery = 1 } } })
+  local gw = w.sizes["icesus.guildStrip"] and w.sizes["icesus.guildStrip"][1] or 0
+  check("on a narrow window the strip takes at most half the row",
+    gw > 0 and gw <= 320, tostring(gw))
+  check("bond names shorten to their initial to fit",
+    strip:find(">A<", 1, true) ~= nil and strip:find("Air", 1, true) == nil, strip)
+  check("the numbers stay whole", strip:find("1420", 1, true) ~= nil, strip)
+  check("the charm chip goes when even initials do not fit",
+    strip:find("Charm", 1, true) == nil, strip)
+
+  w.mud.getMainWindowSize = function() return 1280, 800 end
+  strip = feedResources(icesus, w, { bonds = liveBonds,
+    charms = { desc = "combat archery", abilities = { fletchery = 1 } } })
+  check("a laptop window keeps the charm chip, shortened",
+    strip:find("Charm", 1, true) ~= nil
+      and strip:find("combat archery", 1, true) == nil, strip)
+
+  w.mud.getMainWindowSize = function() return 1600, 900 end
+  strip = feedResources(icesus, w, { bonds = liveBonds,
+    charms = { desc = "combat", abilities = { fletchery = 1 } } })
+  check("a wide window gets the full names back",
+    strip:find("Air", 1, true) ~= nil and strip:find("combat", 1, true) ~= nil, strip)
+end
+
+-- ================================================================
+print("`hud guild` -- the detail printout")
+-- ================================================================
+
+do
+  local icesus, w = load_icesus()
+  local now = 1000
+  w.env.os = setmetatable({ time = function() return now end }, { __index = os })
+  w.mud.isConnected = function() return true end
+  feedVitals(icesus, w, plainVitals)
+  feedResources(icesus, w, liveArthr)
+
+  w.gmcp = {}; w.echoes = {}
+  icesus.hudCommand("guild")
+  check("`hud guild` asks the server for fresh resources",
+    saw(w.gmcp, "Char.Resources"), joined(w.gmcp))
+  check("nothing is printed until the fresh packet lands",
+    not saw(w.echoes, "Devotion"), joined(w.echoes))
+
+  feedResources(icesus, w, liveArthr)
+  local out = joined(w.echoes)
+  check("the arrival prints devotion", out:find("Devotion", 1, true) ~= nil, out)
+  check("ability keys print as the game prints them",
+    out:find("archery damage", 1, true) ~= nil and out:find("fire-brand", 1, true) ~= nil, out)
+  check("the charm collection is named", out:find("combat", 1, true) ~= nil, out)
+  local earth, water, nether, aeth = out:find("earth", 1, true), out:find("water", 1, true),
+                                     out:find("nether", 1, true), out:find("aetheria", 1, true)
+  check("devotion lists the nine in the server's order, zeros included",
+    earth and water and nether and aeth and earth < water and water < nether and nether < aeth, out)
+
+  w.echoes = {}
+  feedResources(icesus, w, liveAbu)
+  check("an ordinary push does not print anything",
+    not saw(w.echoes, "Devotion"), joined(w.echoes))
+
+  w.gmcp = {}; w.echoes = {}
+  icesus.hudCommand("guild")
+  check("a second `hud guild` inside the cooldown does not poll the server",
+    not saw(w.gmcp, "Char.Resources"), joined(w.gmcp))
+  check("but it still prints what it has",
+    saw(w.echoes, "14033"), joined(w.echoes))
+  check("a five-figure devotion prints in full, not as 14k",
+    not saw(w.echoes, "14.0k"), joined(w.echoes))
+
+  now = now + 10
+  w.gmcp = {}
+  icesus.hudCommand("guild")
+  check("once the cooldown has passed it asks again",
+    saw(w.gmcp, "Char.Resources"), joined(w.gmcp))
+end
+
+do
+  local icesus, w = load_icesus()
+  w.mud.isConnected = function() return true end
+  feedVitals(icesus, w, plainVitals)
+  feedResources(icesus, w, { bonds = liveBonds,
+                             souls = { warrior = 4, beast = 9, mage = 2 } })
+  w.echoes = {}
+  icesus.hudCommand("guild")
+  feedResources(icesus, w, { bonds = liveBonds,
+                             souls = { warrior = 4, beast = 9, mage = 2 } })
+  local out = joined(w.echoes)
+  check("the bond table prints the same columns as the guild item",
+    out:find("strength", 1, true) ~= nil and out:find("load", 1, true) ~= nil
+      and out:find("drain", 1, true) ~= nil, out)
+  check("a positive drain keeps its sign", out:find("+8", 1, true) ~= nil, out)
+  check("a negative drain keeps its sign", out:find("-3", 1, true) ~= nil, out)
+  local b, wr, m = out:find("beast", 1, true), out:find("warrior", 1, true),
+                   out:find("mage", 1, true)
+  check("souls list the largest holding first",
+    b and wr and m and b < wr and wr < m, out)
+  check("the soul heading counts the kinds", out:find("3 kinds", 1, true) ~= nil, out)
+end
+
+do
+  local icesus, w = load_icesus()
+  w.mud.isConnected = function() return false end
+  feedVitals(icesus, w, plainVitals)
+  w.gmcp = {}; w.echoes = {}
+  icesus.hudCommand("guild")
+  check("offline, `hud guild` asks for nothing", #w.gmcp == 0, joined(w.gmcp))
+  check("and says there is nothing to show",
+    saw(w.echoes, "no guild resources"), joined(w.echoes))
+
+  w.echoes = {}
+  icesus.hudCommand("")
+  check("`hud` lists the guild subcommand", saw(w.echoes, "hud guild"), joined(w.echoes))
+end
+
+do
+  local icesus, w = load_icesus()
+  w.mud.isConnected = function() return true end
+  feedVitals(icesus, w, withKeys(plainVitals, { vitae = 40 }))
+  w.gmcp = {}
+  check("the strip is clickable", type(w.clicks["icesus.guildStrip"]) == "function")
+  if type(w.clicks["icesus.guildStrip"]) == "function" then
+    w.clicks["icesus.guildStrip"]()
+  end
+  check("clicking the strip is `hud guild`", saw(w.gmcp, "Char.Resources"), joined(w.gmcp))
+  check("the carry summary is a door too",
+    type(w.clicks["icesus.carryLabel"]) == "function")
+end
+
+do
+  local icesus, w = load_icesus()
+  w.gmcp = {}
+  icesus.subscribeGMCP()
+  check("the subscription names Char.Resources",
+    saw(w.gmcp, "Char.Resources 1"), joined(w.gmcp))
+end
+
+-- ================================================================
+print("Karma badges (Char.Status \"karmas\")")
+-- ================================================================
+
+local YINYANG = "\226\152\175"   -- U+262F
+
+do
+  local icesus, w = load_icesus()
+  local row = statusRow(icesus, w, { karmas = { "exp" } })
+  check("a karma alone lights the row up",
+    row:find("no effects", 1, true) == nil, row)
+  check("it is named", row:find("EXP", 1, true) ~= nil, row)
+  check("it wears the karma gold, not an affliction colour",
+    row:find("rgba(252,211,77", 1, true) ~= nil, row)
+  check("it carries the mark the web client uses",
+    row:find(YINYANG, 1, true) ~= nil, row)
+
+  row = statusRow(icesus, w, { stealth = { "invisible" }, karmas = { "luck" },
+                               effects = { "bleeding" } })
+  local sI, kI, eI = row:find("INVIS", 1, true), row:find("LUCK", 1, true),
+                     row:find("BLEEDING", 1, true)
+  check("concealment, then karma, then afflictions",
+    sI and kI and eI and sI < kI and kI < eI, row)
+
+  row = statusRow(icesus, w, { karmas = {} })
+  check("no karma, no badge", row:find("no effects", 1, true) ~= nil, row)
+end
+
+do
+  local icesus, w = load_icesus({ user = [[
+    return { effectStyles = { ["karma momentum"] = {
+      fg = "#123456", bg = "#234567", bd = "#345678" } } }
+  ]] })
+  local row = statusRow(icesus, w, { karmas = { "momentum", "exp" } })
+  check("one karma restyled by name, the other keeps the shared gold",
+    row:find("#123456", 1, true) ~= nil
+      and row:find("rgba(252,211,77", 1, true) ~= nil, row)
+end
+
+-- ================================================================
+print("Momentum source (Char.Status \"momentum_source\")")
+-- ================================================================
+
+do
+  local icesus, w = load_icesus()
+  statusRow(icesus, w, { momentum = "chase the rich vein",
+                         momentum_source = "mining" })
+  local tip = w.tooltips["icesus.momentumBtn"] or ""
+  check("the button's tooltip says where the momentum came from",
+    tip:find("mining", 1, true) ~= nil
+      and tip:find("chase the rich vein", 1, true) ~= nil, tip)
+
+  statusRow(icesus, w, { momentum = "strike" })
+  tip = w.tooltips["icesus.momentumBtn"] or ""
+  check("with no source the tooltip is just the action",
+    tip:find("Use strike", 1, true) ~= nil and tip:find("from", 1, true) == nil, tip)
+
+  statusRow(icesus, w, { momentum = "" })
+  tip = w.tooltips["icesus.momentumBtn"]
+  check("an empty momentum clears the tooltip", tip == "", tostring(tip))
 end
 
 -- ================================================================

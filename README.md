@@ -53,6 +53,16 @@ being negotiated — make sure GMCP is enabled in your profile settings.
 **Bottom strip** (below the main console, above the command line)
 - **Vitals** — HP / SP / EP gauges, plus PSP if your character has any.
   Slim glass pills with vertical gradient. HP pulses red when below 25 %.
+- **Guild readings** — for characters whose guild runs on a resource:
+  `Fury 42` or `Vitae 40` from `Char.Vitals`, a templar's four bond
+  strengths with ▲ / ▼ for filling or draining, and the active charm
+  from `Char.Resources`. Numbers, never gauges — none of these has a
+  maximum to fill against. The strip sizes itself to what it holds,
+  gives the gauges the rest of the row, and is not there at all for a
+  character with nothing to show. Click it, click the carry summary, or
+  type `hud guild` to print the rest to the console: bond load and
+  drain, the soul list largest first, charm abilities, and your
+  standing with the nine deities.
 - **Location & exits** — current room, area, a `SAFE` chip when
   applicable, and the open exits as short cyan letters (`n e s w u`).
 
@@ -60,6 +70,8 @@ being negotiated — make sure GMCP is enabled in your profile settings.
 - **Momentum buttons** — clickable `BERSERK` / `EXECUTE`-style labels
   that light up when `Char.Status.momentum` /
   `Char.Status.special_momentum` are set; click sends `use <name>`.
+  Hover for where the momentum came from — combat, mining, bellows,
+  polish.
 - **Casting / busy bar** — fills over `Char.Casting.progress / cps`
   while a spell or skill runs. Repaints amber for non-spell `busy`
   activities (camping, smelting, fishing, …) so every wait gets a
@@ -71,6 +83,9 @@ being negotiated — make sure GMCP is enabled in your profile settings.
   `SILENT`, `HIDDEN`, `INVIS`, from `Char.Status.stealth` — leads the
   same row in cool, quiet colours, so a sneak that lapses on its own
   is something you see go rather than something you find out about.
+  Karma you spent on yourself — `☯ EXP`, `☯ LUCK`, … from
+  `Char.Status.karmas` — follows in gold, for the same reason: chosen,
+  not inflicted, and the badge disappearing is how you learn one lapsed.
   The row tightens its spacing and then shortens the longest names
   when it fills up, so a badge is never quietly drawn off the edge of
   the column.
@@ -301,6 +316,7 @@ hud chatsize <n>       channel feed text size
 hud example            write a starter Icesus.user.lua
 hud reload             re-read both files after an edit, no relog
 hud reset              forget what `hud` set; your files stay
+hud guild              print bonds, souls, charm abilities and devotion
 ```
 
 Start with `hud example`. It writes an `Icesus.user.lua` with every
@@ -342,6 +358,8 @@ return {
     poisoned = { fg = "#4ade80", bg = "rgba(74,222,128,0.18)",
                  bd = "rgba(74,222,128,0.40)" },
   },
+
+  guildStyles = { fury = "#f97316" },
 }
 ```
 
@@ -352,7 +370,8 @@ return {
 | `fontSizes` | `identity`, `carry`, `exp`, `location`, `mapSave`, `vitals`, `momentum`, `cast`, `badges`, `enemy`, `channels` |
 | `chatStyle` | `time`, `channel`, `tell`, `speech`, `emote`, `talker`, `selfTalker`, `text`, `perChannel` |
 | `palette` | surfaces: `bgDeep`, `bgMain`, `bgPanel`, `bgInput`, `border`, `borderBright` · text: `text`, `textDim`, `textBright` · accents: `ice`, `iceBright`, `iceGlow`, `green`, `red`, `amber`, `cyan` · gauge gradients, each a `{ from, to }` pair: `hpGrad`, `hpGradC` (critical), `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` |
-| `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped. The concealment badges live here too, under their full server names: `["moving silently"]`, `["hiding in shadows"]`, `["invisible"]` |
+| `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped. The concealment badges live here too, under their full server names: `["moving silently"]`, `["hiding in shadows"]`, `["invisible"]`. Karma badges share one `karma` entry; a single karma can be restyled under its own name, `["karma exp"]` |
+| `guildStyles` | CSS colours for the guild readings beside the vitals gauges: `fury`, `vitae`, `charm`, the bond elements `air`, `water`, `fire`, `earth`, and `other` for a scalar the package has never heard of |
 
 Colours are Mudlet colour names in `chatStyle` (`lua showColors()`
 prints every name you can use) and CSS colours in `palette` and

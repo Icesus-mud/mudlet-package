@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **Guild resources reach the HUD.** The server now sends the scalar a
+  guild runs on — fury for firepriests, vitae for scions and water
+  priests — in `Char.Vitals`, and the structured ones — templar bonds,
+  scion souls, charms, piety — in a new `Char.Resources` packet. The
+  package draws what a player watches mid-fight beside the vitals
+  gauges: the scalar, the four bond strengths with an arrow for filling
+  or draining, and the active charm. Numbers, never gauges, since none
+  of these has a maximum to fill against. The strip sizes itself to its
+  content, hands the gauges the rest of the row, and is absent for a
+  character with nothing to show. The rest — bond load and drain, the
+  soul list largest first, charm abilities, devotion to the nine —
+  prints to the console on `hud guild`, or a click on the strip or the
+  carry summary, after one fresh request to the server. A scalar the
+  server grows later shows up with no package change. Colours live in
+  `icesus.guildStyles` for `Icesus.user.lua`. Mirrors what the web
+  client shipped on 2026-08-29.
+- **Karma badges.** `Char.Status.karmas` has been on the wire for
+  months and was dropped on the floor. The karma you spent on yourself
+  — exp, luck, learning, mastery, momentum, impulse — now sits in the
+  effects row after concealment, in gold and with the web client's ☯
+  mark, so a `MOMENTUM` karma is not read as the momentum button.
+  Restyle them all under `karma` in `effectStyles`, or one under
+  `["karma exp"]`.
+- **Momentum buttons say where the momentum came from.** Hover the
+  button for `Momentum from mining — use chase the rich vein`. The
+  source (`combat`, `mining`, `bellows`, `polish`) is
+  `Char.Status.momentum_source`, another field that was already being
+  sent.
 - **Special exits are drawn at last.** The mapper asked Mudlet for
   `setSpecialExit`, a function Mudlet has never had — the special-exit
   family is `addSpecialExit`. Both call sites were wrapped in `pcall`,

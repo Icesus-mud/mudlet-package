@@ -296,12 +296,21 @@ icesus.effectStyles = {
   ["moving silently"]   = { fg = "#94a3b8", bg = "rgba(148,163,184,0.14)", bd = "rgba(148,163,184,0.30)" },
   ["hiding in shadows"] = { fg = "#a5b4fc", bg = "rgba(165,180,252,0.14)", bd = "rgba(165,180,252,0.32)" },
   ["invisible"]         = { fg = "#c4b5fd", bg = "rgba(196,181,253,0.14)", bd = "rgba(196,181,253,0.34)" },
+  -- Karma the player spent on themselves (Char.Status "karmas"): gold,
+  -- and no alarm palette, for the same reason as concealment. One
+  -- shared style; a single karma can be restyled on its own under
+  -- "karma <name>" -- ["karma exp"] = { fg = ... }.
+  ["karma"]             = { fg = "#fcd34d", bg = "rgba(252,211,77,0.12)",  bd = "rgba(252,211,77,0.30)" },
   default            = { fg = "#cbd5e1", bg = "rgba(148,163,184,0.15)", bd = "rgba(148,163,184,0.30)" },
 }
 
 local function effectStyle(name)
-  local key = tostring(name or ""):lower()
-  return icesus.effectStyles[key] or icesus.effectStyles.default
+  local key   = tostring(name or ""):lower()
+  local style = icesus.effectStyles[key]
+  if not style and key:sub(1, 6) == "karma " then
+    style = icesus.effectStyles.karma
+  end
+  return style or icesus.effectStyles.default
 end
 
 -- Concealment states, shortened for the combat column. Spelled out,
@@ -313,6 +322,28 @@ local STEALTH_LABEL = {
   ["moving silently"]   = "silent",
   ["hiding in shadows"] = "hidden",
   ["invisible"]         = "invis",
+}
+
+-- The mark the web client puts on a karma badge, so a MOMENTUM karma
+-- is not read as the momentum button.
+local KARMA_MARK = "\226\152\175"   -- U+262F
+
+-- =============================================================
+-- Guild resource colours -- the readings beside the vitals gauges.
+-- Ported from the web client's .gr-* classes; the bond colours are
+-- the ones the in-game bond table uses (air cyan, water blue, fire
+-- red, earth orange). `other` is what a scalar this build has never
+-- heard of wears. Override from Icesus.user.lua.
+-- =============================================================
+icesus.guildStyles = {
+  fury  = "#fb923c",
+  vitae = "#fb7185",
+  charm = "#5eead4",
+  air   = "#67e8f9",
+  water = "#60a5fa",
+  fire  = "#f87171",
+  earth = "#fbbf24",
+  other = "#7dd3fc",
 }
 
 -- =============================================================
@@ -362,7 +393,7 @@ end
 -- from Icesus.user.lua really does go back to the default instead of
 -- lingering from the previous pass.
 local SECTIONS = { "config", "palette", "fontSizes", "chatStyle",
-                   "effectStyles" }
+                   "effectStyles", "guildStyles" }
 local DEFAULTS = {}
 for _, name in ipairs(SECTIONS) do
   DEFAULTS[name] = shallowCopy(icesus[name])
@@ -471,6 +502,7 @@ end
 local KNOWN_TOP = {
   hudSide = true, fontStack = true, config = true, palette = true,
   fontSizes = true, chatStyle = true, effectStyles = true,
+  guildStyles = true,
 }
 
 -- Layer 1: back to the script defaults.
@@ -538,6 +570,7 @@ function icesus.user.loadData()
   if t.fontSizes    then mergeScalars("fontSizes", icesus.fontSizes, t.fontSizes) end
   if t.chatStyle    then mergeScalars("chatStyle", icesus.chatStyle, t.chatStyle) end
   if t.effectStyles then mergeEffectStyles(t.effectStyles) end
+  if t.guildStyles  then mergeScalars("guildStyles", icesus.guildStyles, t.guildStyles) end
   for k in pairs(t) do
     if not KNOWN_TOP[k] then
       warnUser("%s: not a top-level setting, ignored", tostring(k))
@@ -656,6 +689,18 @@ return {
     -- poisoned = { fg = "#4ade80", bg = "rgba(74,222,128,0.18)",
     --              bd = "rgba(74,222,128,0.40)" },
     -- ["hiding in shadows"] = { fg = "#a5b4fc" },
+    -- Karma badges share one entry; one karma on its own is
+    -- ["karma exp"] = { fg = ... }.
+    -- karma = { fg = "#fcd34d" },
+  },
+
+  -- Guild readings beside the vitals gauges: fury, vitae, the active
+  -- charm, and the four bond elements. `other` is what a resource the
+  -- package has never heard of wears. CSS colours.
+  guildStyles = {
+    -- fury  = "#f97316",
+    -- air   = "#22d3ee",
+    -- other = "#a5f3fc",
   },
 }
 ]==]
@@ -730,6 +775,7 @@ local function hudStatus()
   cecho("  hud example           write a starter Icesus.user.lua\n")
   cecho("  hud reload            re-read the override files\n")
   cecho("  hud reset             forget the settings above\n")
+  cecho("  hud guild             bonds, souls, charm abilities, devotion\n")
   cecho("  Full reference: "
     .. "https://github.com/Icesus-mud/mudlet-package#customising<reset>\n")
 end
@@ -818,6 +864,9 @@ function icesus.hudCommand(arg)
       "\n<lime_green>Icesus<reset> channel feed text set to "
       .. "<yellow>%d pt<reset>.\n", math.floor(n)))
 
+  elseif verb == "guild" then
+    icesus.guildCommand()
+
   elseif verb == "example" then
     icesus.user.writeExample()
 
@@ -859,9 +908,17 @@ icesus.state = {
   enemies         = {},
   effects         = {},
   stealth         = {},     -- concealment the player switched on
+  karmas          = {},     -- karma the player spent on themselves
   cooldowns       = {},     -- { { name, remaining, total }, ... }
   momentum        = "",
   specialMomentum = "",
+  momentumSource  = "",     -- "combat", "mining", "bellows", "polish"
+  -- Guild resources: scalars from Char.Vitals, blocks from
+  -- Char.Resources. stripW is the strip's current width (nil until
+  -- the first refresh after a HUD build); the other two drive the
+  -- `hud guild` request-then-print handshake.
+  guild           = { scalars = {}, resources = {},
+                      stripW = nil, printPending = false, requestedAt = 0 },
   casting         = nil,    -- { spell, progress, cps } when active
   busy            = nil,    -- { activity = "camping" } when set_busy active
   room            = { name = "", area = "", exits = {}, safe = false },
@@ -955,7 +1012,7 @@ function icesus.hudLayout()
   local R = tonumber(icesus.config.borderRight)  or 360
   local B = tonumber(icesus.config.borderBottom) or 64
   local left = (icesus.config.hudSide == "left")
-  local BADGE_W, MODE_W, LOC_H = 140, 104, 28
+  local BADGE_W, MODE_W, LOC_H, VITALS_H = 140, 104, 28, 32
   -- The map-save controls hug the window's far right edge; with the
   -- column parked there they stop short of it by its width.
   local ctrlOff = left and 0 or R
@@ -963,6 +1020,11 @@ function icesus.hudLayout()
     side    = left and "left" or "right",
     T = T, R = R, B = B,
     LOC_H = LOC_H, BADGE_W = BADGE_W, MODE_W = MODE_W,
+    VITALS_H = VITALS_H,
+    -- The guild strip ends this far from the window's right edge: flush
+    -- with it when the column is on the left, short of the column
+    -- otherwise. refreshGuild() sets its width and x from this.
+    guildRight = left and 0 or R,
     colX    = left and 0 or ("-" .. R),      -- combat / comms column
     colEdge = left and "border-right" or "border-left",
     stripX  = left and R or 0,               -- vitals + location rows
@@ -1217,6 +1279,39 @@ function icesus.setupHUD()
   -- when the character has no psionics. Left as nil for now.
   icesus.hud.psp = nil
 
+  -- Guild readings -- fury / vitae, the four bond strengths, the active
+  -- charm -- at the right end of the vitals row. Only characters with
+  -- something to show get it: refreshGuild() sizes it to its content,
+  -- hands the gauges the rest of the row, and hides it again when the
+  -- last reading goes away. Numbers, never gauges -- none of these has
+  -- a maximum to fill against. Click for the detail (`hud guild`).
+  icesus.state.guild.stripW = nil
+  icesus.hud.guildStrip = Geyser.Label:new({
+    name = "icesus.guildStrip",
+    x = "-" .. (L.guildRight + 20), y = "-" .. B,
+    width = 20, height = VITALS_H,
+  })
+  icesus.hud.guildStrip:setStyleSheet(string.format([[
+    background: %s;
+    color: %s;
+    border: 1px solid %s;
+    border-radius: 5px;
+    font-family: %s;
+    font-size: 11pt;
+    qproperty-alignment: 'AlignCenter';
+  ]], P.bgInput, P.textDim, P.border, FS))
+  pcall(function() icesus.hud.guildStrip:setFontSize(fsz("vitals", 10)) end)
+  icesus.hud.guildStrip:setClickCallback(function() icesus.guildCommand() end)
+  pcall(function()
+    icesus.hud.guildStrip:setToolTip(
+      "Click for bonds, souls, charm abilities and devotion (hud guild)")
+  end)
+  icesus.hud.guildStrip:hide()
+  -- The carry summary is the second door to that detail, and for the
+  -- many characters who carry devotion but no guild resource it is the
+  -- only one: they get no strip to click.
+  icesus.hud.carryLabel:setClickCallback(function() icesus.guildCommand() end)
+
   -- =====================================================================
   -- COMBAT & COMMS COLUMN — right-hand by default, left with
   -- `hud side left`. Flat absolute layout (Geyser nested HBox/VBox
@@ -1378,7 +1473,7 @@ function icesus.refreshAll()
     icesus.refreshIdentity, icesus.refreshExp, icesus.refreshCarry,
     icesus.refreshGauges, icesus.refreshMomentum, icesus.refreshCasting,
     icesus.refreshEffects, icesus.refreshCooldowns, icesus.refreshEnemies,
-    icesus.refreshRoom,
+    icesus.refreshRoom, icesus.refreshGuild,
   }
   for _, fn in ipairs(fns) do
     if type(fn) == "function" then pcall(fn) end
@@ -1676,6 +1771,25 @@ function icesus.refreshMomentum()
         "#fca5a5", "rgba(153,27,27,0.20)",  "rgba(220,38,38,0.55)")
   paint(icesus.hud.specialMomentumBtn, icesus.state.specialMomentum,
         "#d8b4fe", "rgba(91,33,182,0.22)",  "rgba(126,34,206,0.55)")
+  -- Where the momentum came from (combat, mining, bellows, polish)
+  -- goes in the tooltip, as on the web client: the button is already
+  -- the widest thing in the column, and the source only matters when
+  -- you stop to wonder why it lit up.
+  local function tip(btn, val, source)
+    if not btn then return end
+    local text = ""
+    if val and val ~= "" then
+      if source and source ~= "" then
+        text = string.format("Momentum from %s \226\128\148 use %s", source, val)
+      else
+        text = "Use " .. val
+      end
+    end
+    pcall(function() btn:setToolTip(text) end)
+  end
+  tip(icesus.hud.momentumBtn,        icesus.state.momentum,
+      icesus.state.momentumSource)
+  tip(icesus.hud.specialMomentumBtn, icesus.state.specialMomentum, nil)
 end
 
 function icesus.refreshCasting()
@@ -1729,6 +1843,24 @@ end
 
 local ELLIPSIS = "\226\128\166"
 
+-- Character cells in a UTF-8 string: every byte that is not a
+-- continuation byte starts one. The karma mark is three bytes and one
+-- cell, which is why #s will not do here.
+local function ucells(s)
+  return select(2, tostring(s or ""):gsub("[^\128-\191]", ""))
+end
+
+-- The first n characters of a UTF-8 string.
+local function uhead(s, n)
+  local out, i = {}, 0
+  for ch in tostring(s or ""):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+    i = i + 1
+    if i > n then break end
+    out[#out + 1] = ch
+  end
+  return table.concat(out)
+end
+
 -- pills: { { raw = "BLEEDING", text = .., cells = .. }, ... }, mutated
 -- in place. Returns the padding and gap that fit, in &nbsp; cells.
 local function fitBadges(pills, cells)
@@ -1756,7 +1888,7 @@ local function fitBadges(pills, cells)
     end
     if not worst or len <= 5 then break end
     worst.cells = len - 1
-    worst.text  = worst.raw:sub(1, worst.cells - 1) .. ELLIPSIS
+    worst.text  = uhead(worst.raw, worst.cells - 1) .. ELLIPSIS
   end
   return 1, 1
 end
@@ -1765,7 +1897,8 @@ function icesus.refreshEffects()
   if not icesus.hud or not icesus.hud.effectsRow then return end
   local fx    = icesus.state.effects or {}
   local sneak = icesus.state.stealth or {}
-  if #fx == 0 and #sneak == 0 then
+  local karma = icesus.state.karmas  or {}
+  if #fx == 0 and #sneak == 0 and #karma == 0 then
     icesus.hud.effectsRow:echo(
       [[<center><span style="color:#555">no effects</span></center>]])
     return
@@ -1779,12 +1912,20 @@ function icesus.refreshEffects()
     local raw = tostring(label):upper()
     pills[#pills + 1] = { raw   = raw,
                           text  = raw,
-                          cells = #raw,
+                          cells = ucells(raw),
                           style = effectStyle(styleName) }
   end
   for _, s in ipairs(sneak) do
     local name = tostring(s)
     addPill(STEALTH_LABEL[name:lower()] or name, name)
+  end
+  -- Karma the player spent on themselves comes next: chosen, not
+  -- inflicted, so it sits with concealment rather than the afflictions.
+  -- It runs for hours, and the badge vanishing is how you learn one
+  -- lapsed.
+  for _, k in ipairs(karma) do
+    local name = tostring(k)
+    addPill(KARMA_MARK .. " " .. name, "karma " .. name:lower())
   end
   for _, e in ipairs(fx) do addPill(e, e) end
 
@@ -1872,6 +2013,363 @@ end
 -- Char.Vitals & Char.Maxstats use: hp, mana, moves, psp, maxhp,
 --   maxmana, maxmoves, maxpsp.
 -- =============================================================
+-- =============================================================
+-- Guild resources -- two GMCP sources, one strip on the vitals row.
+--   Char.Vitals    carries the scalars a guild runs on (fury, vitae,
+--                  ...) beside HP/SP/EP, every heartbeat. The server
+--                  never announces which keys those are -- adding one
+--                  is a row in a table on the player object -- so every
+--                  key that is not a core pool is a guild scalar here,
+--                  and a resource the server grows later needs no
+--                  release.
+--   Char.Resources carries the structured ones: templar bonds, scion
+--                  souls, charms, piety. Throttled server-side to one
+--                  push per ten seconds, replaced wholesale on arrival;
+--                  an empty payload means a block you were shown has
+--                  gone away.
+-- The strip holds what a player watches mid-fight: the scalar, the
+-- four bond strengths with a filling / draining arrow, the active
+-- charm. Load and drain, the soul list and the nine deities are one
+-- `hud guild` (or a click on the strip) away, printed to the console.
+-- =============================================================
+local CORE_VITALS = { hp = true, mana = true, moves = true, psp = true,
+                      maxhp = true, maxmana = true, maxmoves = true,
+                      maxpsp = true }
+local BOND_ORDER  = { "air", "water", "fire", "earth" }
+-- The nine, in the order the server's piety daemon lists them, so the
+-- list never reshuffles between pushes.
+local PIETY_ORDER = { "earth", "water", "fire", "air", "nameless king",
+                      "nether", "ancestors", "spirits", "aetheria" }
+local ARROW_UP, ARROW_DOWN = "\226\150\178", "\226\150\188"   -- U+25B2 / U+25BC
+local GUILD_PAD = 10      -- px each side of the strip's text
+local GUILD_TIP = "Click for bonds, souls, charm abilities and devotion (hud guild)"
+
+-- A populated sub-table, or nil. FluffOS encodes an empty mapping as
+-- [], which Mudlet decodes to an empty table -- the same as no block.
+local function block(t, key)
+  local b = type(t) == "table" and t[key]
+  if type(b) == "table" and next(b) ~= nil then return b end
+  return nil
+end
+
+-- A guild number is an exact reading, not a gauge: a bond at 1420 must
+-- never print as 1.4k.
+local function fmtNum(n)
+  return string.format("%d", math.floor(tonumber(n) or 0))
+end
+
+local function capitalise(s)
+  s = tostring(s or "")
+  return s:sub(1, 1):upper() .. s:sub(2)
+end
+
+-- Sorted keys of a name -> number table, largest value first, ties by
+-- name -- the order a scion decides what to forge in.
+local function keysByValue(t)
+  local keys = {}
+  for k in pairs(t) do keys[#keys + 1] = tostring(k) end
+  table.sort(keys, function(a, b)
+    local va, vb = tonumber(t[a]) or 0, tonumber(t[b]) or 0
+    if va ~= vb then return va > vb end
+    return a < b
+  end)
+  return keys
+end
+
+-- What the strip draws, in order: { html = .., cells = .. } per chip.
+-- `level` is how far to compact when the row is too narrow for the
+-- full form: 1 shortens bond names to their initial, 2 also shortens
+-- the charm name, 3 drops the charm chip. The numbers are never
+-- touched -- a reading that is wrong is worse than one that is absent.
+function icesus.guildChips(level)
+  level = tonumber(level) or 0
+  local g  = icesus.state.guild
+  local P  = icesus.palette
+  local GS = icesus.guildStyles
+  local chips = {}
+  local function chip(label, colour, value, arrow)
+    local html = string.format(
+      [[<span style="color:%s">%s</span>&nbsp;]]
+      .. [[<span style="color:%s;font-weight:700">%s</span>]],
+      colour, htmlEscape(label), P.textBright, htmlEscape(value))
+    local cells = ucells(label) + 1 + ucells(value)
+    if arrow then
+      html  = html .. string.format([[<span style="color:%s">%s</span>]],
+                arrow.colour, arrow.glyph)
+      cells = cells + 1
+    end
+    chips[#chips + 1] = { html = html, cells = cells }
+  end
+
+  local keys = {}
+  for k in pairs(g.scalars or {}) do keys[#keys + 1] = k end
+  table.sort(keys)
+  for _, k in ipairs(keys) do
+    chip(capitalise(k), GS[k] or GS.other, fmtNum(g.scalars[k]))
+  end
+
+  -- Strength in the strip, with the arrow saying whether the bond is
+  -- filling or draining this tick. Load and the drain figure itself
+  -- are in the printout, where there is room to label them.
+  local bonds = block(g.resources, "bonds")
+  if bonds then
+    for _, el in ipairs(BOND_ORDER) do
+      local b = bonds[el]
+      if type(b) == "table" then
+        local drain = tonumber(b.drain) or 0
+        local arrow
+        if drain > 0 then
+          arrow = { glyph = ARROW_UP,   colour = P.green }
+        elseif drain < 0 then
+          arrow = { glyph = ARROW_DOWN, colour = P.red }
+        end
+        local label = capitalise(el)
+        if level >= 1 then label = label:sub(1, 1) end
+        chip(label, GS[el] or GS.other, fmtNum(b.strength), arrow)
+      end
+    end
+  end
+
+  -- Souls stay out of the strip: a live scion holds fifty-odd fragment
+  -- kinds, and their sum answers no question a player has mid-fight.
+  -- Vitae is the scion's live number, and it is already here.
+  local charms = block(g.resources, "charms")
+  if charms and level < 3 then
+    local desc = type(charms.desc) == "string" and charms.desc or ""
+    if desc ~= "" or block(charms, "abilities") then
+      if desc == "" then desc = "active" end
+      if level >= 2 and ucells(desc) > 7 then
+        desc = uhead(desc, 6) .. ELLIPSIS
+      end
+      chip("Charm", GS.charm, desc)
+    end
+  end
+  return chips
+end
+
+-- Pixels the strip needs for these chips: the badge rows' cell
+-- arithmetic, plus padding, rounded up to 20 px so a number growing a
+-- digit does not reflow the gauges every heartbeat.
+local function stripWidth(chips)
+  local cells = 0
+  for i, c in ipairs(chips) do
+    cells = cells + c.cells + (i < #chips and 3 or 0)
+  end
+  local px = math.ceil(cells * fsz("vitals", 10) * 0.88) + GUILD_PAD * 2
+  return math.ceil(px / 20) * 20
+end
+
+function icesus.hasGuildDetail()
+  local r = icesus.state.guild.resources
+  if type(r) ~= "table" then return false end
+  for _, v in pairs(r) do
+    if type(v) == "table" and next(v) ~= nil then return true end
+  end
+  return false
+end
+
+function icesus.refreshGuild()
+  if not icesus.hud or not icesus.hud.guildStrip then return end
+  local L      = icesus.hudLayout()
+  local P      = icesus.palette
+  local st     = icesus.state.guild
+  local strip  = icesus.hud.guildStrip
+  local bottom = icesus.hud.bottom
+
+  -- The strip may take half of the row beside the column; the gauges
+  -- keep the rest. Past that it compacts, a step at a time, and as a
+  -- last resort it is clamped and the ends of the row are lost.
+  local mainW = 1600
+  if getMainWindowSize then
+    local ok, mw = pcall(getMainWindowSize)
+    if ok and tonumber(mw) then mainW = tonumber(mw) end
+  end
+  local budget = math.max(120, math.floor((mainW - L.R) / 2))
+  local chips, gw = {}, 0
+  for level = 0, 3 do
+    chips = icesus.guildChips(level)
+    if #chips == 0 then break end
+    gw = stripWidth(chips)
+    if gw <= budget then break end
+  end
+  if gw > budget then gw = budget end
+
+  -- The carry summary advertises the detail only while there is some.
+  if icesus.hud.carryLabel then
+    pcall(function()
+      icesus.hud.carryLabel:setToolTip(icesus.hasGuildDetail() and GUILD_TIP or "")
+    end)
+  end
+
+  if #chips == 0 then
+    if st.stripW ~= 0 then
+      st.stripW = 0
+      pcall(function() strip:hide() end)
+      pcall(function() bottom:resize(L.stripW, L.VITALS_H) end)
+    end
+    return
+  end
+
+  if gw ~= st.stripW then
+    st.stripW = gw
+    pcall(function() strip:resize(gw, L.VITALS_H) end)
+    pcall(function() strip:move("-" .. (L.guildRight + gw), "-" .. L.B) end)
+    pcall(function() bottom:resize("100%-" .. (L.R + gw), L.VITALS_H) end)
+    pcall(function() strip:show() end)
+  end
+
+  local sep = string.format(
+    [[<span style="color:%s">&nbsp;&middot;&nbsp;</span>]], P.borderBright)
+  local parts = {}
+  for _, c in ipairs(chips) do parts[#parts + 1] = c.html end
+  strip:echo([[<center>]] .. table.concat(parts, sep) .. [[</center>]])
+end
+
+-- Lines of `name value` pairs, wrapped so a scion's fifty-odd soul
+-- kinds do not arrive as one console-wide sentence. Zeroes stay,
+-- dimmed: "no standing with the nether" is itself a reading.
+local function kvLines(items, width)
+  local sep = " <grey>\194\183<reset> "
+  local lines, cur, len = {}, {}, 0
+  for _, it in ipairs(items) do
+    local plain = #it.key + 1 + #it.val
+    if #cur > 0 and len + 3 + plain > width then
+      lines[#lines + 1] = table.concat(cur, sep)
+      cur, len = {}, 0
+    end
+    if it.dim then
+      cur[#cur + 1] = string.format("<grey>%s %s<reset>", it.key, it.val)
+    else
+      cur[#cur + 1] = string.format("%s <white>%s<reset>", it.key, it.val)
+    end
+    len = len + (#cur > 1 and 3 or 0) + plain
+  end
+  if #cur > 0 then lines[#lines + 1] = table.concat(cur, sep) end
+  return lines
+end
+
+local function kvItems(t, dimZero)
+  local items = {}
+  for _, k in ipairs(keysByValue(t)) do
+    local v = tonumber(t[k]) or 0
+    items[#items + 1] = { key = k, val = fmtNum(v), dim = dimZero and v == 0 }
+  end
+  return items
+end
+
+local INDENT = "             "
+
+function icesus.printGuildDetail()
+  local r   = icesus.state.guild.resources
+  local any = false
+  cecho("\n<cyan>Icesus guild resources<reset>\n")
+
+  -- Bonds: the same columns the in-game bond table prints, in the same
+  -- order and with the same words, so a templar reading one is reading
+  -- the other.
+  local bonds = block(r, "bonds")
+  if bonds then
+    any = true
+    cecho("  <yellow>Bonds<reset>      <grey>element      strength    load   drain<reset>\n")
+    for _, el in ipairs(BOND_ORDER) do
+      local b = bonds[el]
+      if type(b) == "table" then
+        local drain = tonumber(b.drain) or 0
+        local col = drain > 0 and "green" or (drain < 0 and "red" or "grey")
+        cecho(string.format(INDENT .. "%-12s %8s  %6s   <%s>%s%s<reset>\n",
+          el, fmtNum(b.strength), fmtNum(b.load), col,
+          drain > 0 and "+" or "", fmtNum(drain)))
+      end
+    end
+    cecho(INDENT .. "<grey>drain is the net change each ten-second tick: "
+      .. "positive fills the bond, negative empties it<reset>\n")
+  end
+
+  local souls = block(r, "souls")
+  if souls then
+    any = true
+    local items = kvItems(souls, true)
+    cecho(string.format("  <yellow>Souls<reset>      <grey>%d kind%s, largest first<reset>\n",
+      #items, #items == 1 and "" or "s"))
+    for _, line in ipairs(kvLines(items, 70)) do cecho(INDENT .. line .. "\n") end
+  end
+
+  local charms = block(r, "charms")
+  if charms then
+    local desc = type(charms.desc) == "string" and charms.desc or ""
+    local abil = block(charms, "abilities")
+    if desc ~= "" or abil then
+      any = true
+      cecho(string.format("  <yellow>Charm<reset>      <white>%s<reset>\n",
+        desc ~= "" and desc or "active"))
+      if abil then
+        for _, line in ipairs(kvLines(kvItems(abil, false), 70)) do
+          cecho(INDENT .. line .. "\n")
+        end
+      end
+    end
+  end
+
+  local piety = block(r, "piety")
+  if piety then
+    any = true
+    local seen, items = {}, {}
+    local function add(k)
+      local v = tonumber(piety[k]) or 0
+      items[#items + 1] = { key = k, val = fmtNum(v), dim = (v == 0) }
+      seen[k] = true
+    end
+    for _, k in ipairs(PIETY_ORDER) do
+      if piety[k] ~= nil then add(k) end
+    end
+    local rest = {}
+    for k in pairs(piety) do
+      if not seen[k] then rest[#rest + 1] = tostring(k) end
+    end
+    table.sort(rest)
+    for _, k in ipairs(rest) do add(k) end
+    cecho("  <yellow>Devotion<reset>   <grey>your standing with the nine<reset>\n")
+    for _, line in ipairs(kvLines(items, 70)) do cecho(INDENT .. line .. "\n") end
+  end
+
+  if not any then
+    cecho("  <grey>Nothing to show \226\128\148 your character carries no guild "
+      .. "resources or devotion right now.<reset>\n")
+  end
+end
+
+-- `hud guild`, and a click on the strip or the carry summary. Ask the
+-- server for a fresh Char.Resources, then print when it lands. The
+-- server throttles its own pushes to one every ten seconds because
+-- building the payload reaches three daemons; an explicit request
+-- clears that throttle, and the moment someone is actually reading
+-- the numbers is the moment worth spending it. The cooldown here only
+-- stops a repeated command from becoming a poll -- inside it, the
+-- last push is printed as is.
+icesus.GUILD_REFRESH_S = 2
+function icesus.guildCommand()
+  local st  = icesus.state.guild
+  local now = os.time()
+  if isConnected and isConnected()
+     and (now - (st.requestedAt or 0)) >= icesus.GUILD_REFRESH_S then
+    st.requestedAt  = now
+    st.printPending = true
+    sendGMCP("Char.Resources")
+    -- A server that has never heard of the package answers nothing;
+    -- print what we have rather than nothing at all.
+    if tempTimer then
+      tempTimer(3, function()
+        if st.printPending then
+          st.printPending = false
+          icesus.printGuildDetail()
+        end
+      end)
+    end
+    return
+  end
+  icesus.printGuildDetail()
+end
+
 function icesus.onVitals()
   local v = gmcp.Char and gmcp.Char.Vitals
   if not v then return end
@@ -1885,6 +2383,28 @@ function icesus.onVitals()
   s.epmax  = tonumber(v.maxmoves) or s.epmax
   s.pspmax = tonumber(v.maxpsp)   or s.pspmax
   icesus.refreshGauges()
+  -- Guild scalars ride here beside HP. Read from this packet, which
+  -- Mudlet replaces whole, rather than accumulated: a reincarnated
+  -- firepriest must not keep a ghost Fury reading.
+  local scalars = {}
+  for k, val in pairs(v) do
+    if not CORE_VITALS[k] and type(val) == "number" then scalars[k] = val end
+  end
+  icesus.state.guild.scalars = scalars
+  icesus.refreshGuild()
+end
+
+function icesus.onResources()
+  local r  = gmcp.Char and gmcp.Char.Resources
+  local st = icesus.state.guild
+  -- Replaced wholesale, never merged: an empty payload is the server
+  -- saying a block you were shown has gone away.
+  st.resources = (type(r) == "table") and r or {}
+  icesus.refreshGuild()
+  if st.printPending then
+    st.printPending = false
+    icesus.printGuildDetail()
+  end
 end
 
 function icesus.onMaxstats()
@@ -2001,11 +2521,13 @@ function icesus.onStatus()
   -- momentum
   icesus.state.momentum        = s.momentum         or ""
   icesus.state.specialMomentum = s.special_momentum or ""
+  icesus.state.momentumSource  = s.momentum_source  or ""
   icesus.refreshMomentum()
 
   -- effects, and the concealment the player switched on
   icesus.state.effects = (type(s.effects) == "table") and s.effects or {}
   icesus.state.stealth = (type(s.stealth) == "table") and s.stealth or {}
+  icesus.state.karmas  = (type(s.karmas)  == "table") and s.karmas  or {}
   icesus.refreshEffects()
 
   -- Busy state (camping, smelting, fishing, etc.) — a non-spell action
@@ -3880,6 +4402,7 @@ function icesus.subscribeGMCP()
   sendGMCP('Core.Supports.Set ['
         .. '"Char 1", "Char.Base 1", "Char.Vitals 1", "Char.Maxstats 1", '
         .. '"Char.Status 1", "Char.Casting 1", "Char.Cooldowns 1", '
+        .. '"Char.Resources 1", '
         .. '"Char.EnemyDeath 1", '
         .. '"Comm 1", "Comm.Channel.Tell 1", "Comm.Channel.Text 1", '
         .. '"Room 1", "Room.Info 1", "Room.Speech 1"]')
@@ -3924,6 +4447,7 @@ function icesus.install()
   regFn("gmcp.Char.Status",     "onStatus")
   regFn("gmcp.Char.Casting",    "onCasting")
   regFn("gmcp.Char.Cooldowns",  "onCooldowns")
+  regFn("gmcp.Char.Resources",  "onResources")
   regFn("gmcp.Char.EnemyDeath", "onEnemyDeath")
   regFn("gmcp.Room.Info",            "onRoomInfo")
   regFn("gmcp.Room.Speech",          "onRoomSpeech")

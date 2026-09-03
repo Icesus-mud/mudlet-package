@@ -30,7 +30,8 @@
       "maxhp":    200,
       "maxmana":  120,
       "maxmoves": 80,
-      "maxpsp":   50
+      "maxpsp":   50,
+      "fury":     42
     }
   },
   {
@@ -51,12 +52,14 @@
       "max_vol":    12000,
       "effects":    ["bleeding", "stunned"],
       "stealth":    ["moving silently", "hiding in shadows"],
+      "karmas":     ["exp", "luck"],
       "enemies": [
         { "name": "an orc warrior",  "hp": 60, "shape": "severely hurt"  },
         { "name": "an orc shaman",   "hp": 90, "shape": "slightly hurt"  },
         { "name": "a dire wolf",     "hp": 40, "shape": "badly wounded"  }
       ],
       "momentum":         "berserk",
+      "momentum_source":  "combat",
       "special_momentum": "execute"
     }
   },
@@ -80,6 +83,26 @@
         { "name": "execute",       "remaining": 12, "total": 30  },
         { "name": "breath weapon", "remaining": 90, "total": 300 }
       ]
+    }
+  },
+  {
+    "delay_ms": 100,
+    "package": "Char.Resources",
+    "payload": {
+      "bonds": {
+        "air":   { "strength": 1420, "load": 12, "drain": 8 },
+        "water": { "strength": 980,  "load": 0,  "drain": -3 },
+        "fire":  { "strength": 500,  "load": 4,  "drain": 0 },
+        "earth": { "strength": 1100, "load": 9,  "drain": 2 }
+      },
+      "charms": {
+        "desc": "combat",
+        "abilities": { "archery damage": 5, "exp rate": 1, "shoot cost": 5,
+                       "reload cost": 5, "fletchery": 1, "fire-brand": 1 }
+      },
+      "piety": { "earth": 0, "nether": 0, "water": 0, "spirits": 0,
+                 "ancestors": 5041, "aetheria": 4288, "air": 14033,
+                 "nameless king": 0, "fire": 3005 }
     }
   },
   {
