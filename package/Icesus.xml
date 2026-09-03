@@ -3242,14 +3242,29 @@ end
 -- Approach contributed by Steve De Jongh (sdejongh / Arthr), PR #5.
 local function roomSig(r)
   local p = { tostring(r.name or ""), tostring(r.area or "") }
+  local special = false
   if type(r.exits) == "table" then
     local k = {}
-    for dir, dest in pairs(r.exits) do k[#k+1] = tostring(dir) .. "=" .. tostring(dest) end
+    for dir, dest in pairs(r.exits) do
+      k[#k+1] = tostring(dir) .. "=" .. tostring(dest)
+      if type(dir) == "string" and dir ~= "" and not CARDINALS[dir] then
+        special = true
+      end
+    end
     table.sort(k)
     p[#p+1] = table.concat(k, ",")
   end
   if type(r.coords)  == "table"  then p[#p+1] = table.concat(r.coords, ",") end
   if type(r.terrain) == "string" then p[#p+1] = r.terrain end
+  -- Rooms with a special exit carry a drawing-generation marker.
+  -- Packages before v1.0.19 armed the fast path for these rooms
+  -- without ever drawing the exit (#13), and nothing above changes
+  -- on a package upgrade, so their stored signature would have
+  -- matched forever. The marker makes each of them miss the fast
+  -- path once. Rooms without special exits are left alone: their
+  -- signature is unchanged. Bump the marker if the rebuild path
+  -- ever again learns to draw something it did not before.
+  if special then p[#p+1] = "sx1" end
   return table.concat(p, "|")
 end
 

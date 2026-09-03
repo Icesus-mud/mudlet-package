@@ -1579,5 +1579,79 @@ do
     rooms[roomId].special["enter cellar"] == m.idToRoom["cell0001"])
 end
 
+-- ================================================================
+-- v1.0.20: a room with a special exit mapped by an earlier package
+-- gets one full rebuild on its next visit. Packages before v1.0.19
+-- never drew special exits (#13) yet armed the fast path for those
+-- rooms like any other, and the room signature — name, area, exits,
+-- coords, terrain — has nothing in it that a package upgrade
+-- changes. So the v1.0.19 fix only ever reached rooms mapped after
+-- it. `legacySig` is v1.0.19's roomSig verbatim: the stored format
+-- being migrated from, kept here so the test does not depend on how
+-- the current signature differs from it.
+-- The two checks on the plain room pass before the change as well;
+-- they pin the requirement that rooms without special exits keep
+-- their stored signature and are not rebuilt.
+-- ================================================================
+local function legacySig(r)
+  local p = { tostring(r.name or ""), tostring(r.area or "") }
+  if type(r.exits) == "table" then
+    local k = {}
+    for dir, dest in pairs(r.exits) do k[#k+1] = tostring(dir) .. "=" .. tostring(dest) end
+    table.sort(k)
+    p[#p+1] = table.concat(k, ",")
+  end
+  if type(r.coords)  == "table"  then p[#p+1] = table.concat(r.coords, ",") end
+  if type(r.terrain) == "string" then p[#p+1] = r.terrain end
+  return table.concat(p, "|")
+end
+
+do
+  local icesus = load_icesus()
+  icesus.mapper.idMap = nil
+  local shop = roominfo("shop0002",
+    { area = "Vaerlon", exits = { north = "road0002", ["enter shop"] = "insid002" } })
+  local plain = roominfo("road0002",
+    { area = "Vaerlon", exits = { south = "shop0002" } })
+  icesus.mapper.onRoomInfo(shop)
+  icesus.mapper.onRoomInfo(plain)
+  local m = icesus.mapper.idMap
+  local shopId = m.idToRoom["shop0002"]
+
+  -- Put both rooms into the state an older package left them in:
+  -- fast path armed with the old signature, no special exit drawn.
+  m.seen["shop0002"] = legacySig(shop)
+  m.seen["road0002"] = legacySig(plain)
+  rooms[shopId].special = {}
+
+  calls = {}
+  icesus.mapper.dirty = false
+  icesus.mapper.onRoomInfo(shop)
+  check("a room with a special exit mapped by an older package is rebuilt on its next visit",
+    rooms[shopId].special["enter shop"] == m.idToRoom["insid002"],
+    tostring(rooms[shopId].special["enter shop"]))
+  check("that rebuild marks the map dirty so the new signature is saved",
+    icesus.mapper.dirty == true)
+
+  calls = {}
+  icesus.mapper.dirty = false
+  icesus.mapper.onRoomInfo(shop)
+  check("the rebuilt room takes the fast path on the visit after",
+    (calls.addRoom or 0) == 0 and (calls.setExit or 0) == 0
+      and (calls.addSpecialExit or 0) == 0,
+    string.format("addRoom=%d setExit=%d addSpecialExit=%d",
+      calls.addRoom or 0, calls.setExit or 0, calls.addSpecialExit or 0))
+
+  calls = {}
+  icesus.mapper.dirty = false
+  icesus.mapper.onRoomInfo(plain)
+  check("a room without special exits keeps its old signature and the fast path",
+    (calls.addRoom or 0) == 0 and (calls.setExit or 0) == 0
+      and (calls.centerview or 0) == 1,
+    string.format("addRoom=%d setExit=%d centerview=%d",
+      calls.addRoom or 0, calls.setExit or 0, calls.centerview or 0))
+  check("and is not marked dirty", icesus.mapper.dirty == false)
+end
+
 print(string.format("\n%d/%d checks passed, %d failed", total - failures, total, failures))
 os.exit(failures == 0 and 0 or 1)
