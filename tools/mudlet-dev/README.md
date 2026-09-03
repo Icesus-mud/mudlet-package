@@ -42,8 +42,8 @@ are already present. That also means it never *updates* Mudlet: to
 pull a newer release over the top of the one you have, run it as
 `MUDLET_UPDATE=1 ./tools/mudlet-dev/install.sh`. Worth doing whenever
 Mudlet ships a release, since a screenshot only proves the package
-works on the build sitting in `~/mudlet-bin`. Currently on **4.22.0**
-(2026-07-06).
+works on the build sitting in `~/mudlet-bin`. Currently on **5.0.1**
+(2026-09-02).
 
 `run.sh` writes three keys into `~/.config/mudlet/Mudlet.ini` before
 launching, to settle first-run dialogs that would otherwise cover the
@@ -64,7 +64,17 @@ Then look at `tools/mudlet-dev/screenshots/latest.png`.
 The default `run.sh dev` mode:
 
 - Wipes any previous `icesus-dev` Mudlet profile so each run starts
-  clean.
+  clean, then seeds an empty save into `current/` so Mudlet treats the
+  profile as one that already exists. Without that seed, Mudlet 5.0
+  fills a new profile with its default packages, and the
+  `mudlet-base-ui` starter interface docks its own map, chat and vitals
+  panels over the right-hand third of the screen — straight on top of
+  our HUD. A real Icesus player never sees this: Mudlet picks the
+  preinstall set from the profile *name* via `TGameDetails::findGame()`,
+  and the `Icesus` entry is flagged `providesOwnUi`, so the starter UI
+  stands aside and `icesus-loader` is installed instead. Naming this
+  profile `Icesus` is not the fix — the loader would then download the
+  *released* package over the local build under test.
 - Pre-points the profile at `icesus.org:4000` (override with
   `ICESUS_HOST` / `ICESUS_PORT`).
 - Installs `dist/Icesus.mpackage` via Mudlet's CLI install path.

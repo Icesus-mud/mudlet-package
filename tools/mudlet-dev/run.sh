@@ -162,6 +162,41 @@ else
   echo "false" >"$PROFILE_DIR/AutoLogin"
 fi
 
+# A profile with no *.xml save is "new", and Mudlet 5.0 fills a new one
+# with its default packages - generic_mapper and, since 5.0, the
+# mudlet-base-ui starter interface. The starter UI docks its own map,
+# chat and vitals panels over the right-hand third of the screen, which
+# is exactly where our HUD draws: the screenshot then shows two
+# interfaces fighting, and neither reads.
+#
+# A real Icesus player never sees that. Mudlet picks the preinstall set
+# from the profile NAME, via TGameDetails::findGame() - a profile named
+# "Icesus" resolves to icesus.org, whose entry carries providesOwnUi, so
+# the starter UI is skipped and icesus-loader is installed instead. This
+# profile is named icesus-dev and aimed at a fixture replayer, so it
+# matches no game and gets the generic treatment.
+#
+# Naming it "Icesus" is not the fix: the loader would then download the
+# RELEASED package from GitHub on connect and install it over the local
+# build under test. Seeding an empty save is - Mudlet then treats the
+# profile as one that already exists and preinstalls nothing, which is
+# the state a real Icesus profile reaches anyway once our install()
+# has dropped generic_mapper.
+mkdir -p "$PROFILE_DIR/current"
+cat >"$PROFILE_DIR/current/seed.xml" <<'SEED'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE MudletPackage>
+<MudletPackage version="1.001">
+ <TriggerPackage />
+ <TimerPackage />
+ <AliasPackage />
+ <ActionPackage />
+ <ScriptPackage />
+ <KeyPackage />
+ <VariablePackage><HiddenVariables /></VariablePackage>
+</MudletPackage>
+SEED
+
 # Optional player-customisation files. The profile directory is what
 # getMudletHomeDir() returns, so dropping them here is exactly what a
 # player does by hand.
