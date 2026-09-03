@@ -111,7 +111,15 @@ inject = f"""
     <script><![CDATA[
 -- tools/mudlet-dev fake mode: dial the local fixture replayer once the
 -- profile finishes loading. Stripped from real builds.
+--
+-- The profile is pointed at the replayer already, so normally it is
+-- connected before this runs and dialling again would only drop the
+-- session and reconnect. This stays as the fallback for when the
+-- replayer was not up yet at profile load.
+local connected = false
+registerAnonymousEventHandler("sysConnectionEvent", function() connected = true end)
 tempTimer(0.5, function()
+  if connected then return end
   cecho("\\n<grey>[fakeconnect] dialing 127.0.0.1:{port}<reset>\\n")
   connectToServer("127.0.0.1", {port})
 end)
@@ -151,8 +159,22 @@ fi
 # -----------------------------------------------------------------
 rm -rf "$PROFILE_DIR"
 mkdir -p "$PROFILE_DIR"
-echo "$ICESUS_HOST" >"$PROFILE_DIR/url"
-echo "$ICESUS_PORT" >"$PROFILE_DIR/port"
+
+# Host::readProfileData() reads these through a QDataStream, not as text:
+# a big-endian quint32 byte count followed by UTF-16BE. Plain `echo` was
+# read back as an empty string, so the profile has in fact always started
+# on no host at all - which is why fake mode logged "Unable to connect"
+# before the injected script dialled, and why `dev` mode never really
+# pointed at icesus.org the way this script claimed.
+write_profile_datum() {
+  python3 -c '
+import struct, sys
+data = sys.argv[2].encode("utf-16-be")
+open(sys.argv[1], "wb").write(struct.pack(">I", len(data)) + data)
+' "$1" "$2"
+}
+write_profile_datum "$PROFILE_DIR/url"  "$ICESUS_HOST"
+write_profile_datum "$PROFILE_DIR/port" "$ICESUS_PORT"
 echo "true" >"$PROFILE_DIR/GMCP"
 # fake mode wants Mudlet to dial localhost on its own; dev mode stays
 # manual to avoid accidentally connecting with cached creds.
