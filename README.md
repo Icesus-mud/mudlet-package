@@ -491,6 +491,20 @@ out means building your own, as in the example above. And panel order
 within the column is fixed — reordering means `move()`ing the widgets
 in `onHudReady`.
 
+## Community packages
+
+Players write Icesus packages too. These live in their authors' own
+repos, are kept up by them, and run alongside this package.
+
+- **[Icesus Effects](https://github.com/destor/icefx)** by Merak tracks
+  your spell and skill effects from their game messages: a button per
+  effect, with how long it has run and roughly when it will end,
+  learned from your earlier casts. Install:
+
+  ```
+  lua installPackage("https://github.com/destor/icefx/releases/latest/download/IcesusEffects.mpackage")
+  ```
+
 ## Resetting and reinstalling
 
 If the HUD looks frozen after a link-death or a long stretch of bad
