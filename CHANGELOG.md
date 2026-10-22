@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.21 — 2026-10-22
+
+- **Wounds.** Each bleeding body part gets its own badge in the effects
+  row — `LEFT ARM NASTY`, `HEAD SEVERE` — amber for a minor wound
+  through deep red for a fatal one, standing where the bare `BLEEDING`
+  badge used to. When the row cannot hold them all they fold into one
+  `BLEEDING ×3` in the colour of the worst, in the same spot, so a
+  crowded row loses nothing it did not lose before. Restyle them under
+  `["wound minor"]` … `["wound fatal"]` in `effectStyles`. The data is
+  `Char.Status.wounds`, which the server has sent for months.
+- **Sleeping, resting, meditating, unconscious.** Whatever you are
+  doing other than standing shows on the banner right after your level,
+  in its own colour, so you can tell at a glance why your commands are
+  not going through (issue #14). Colours are the new palette keys
+  `posResting`, `posSleeping` and `posMeditating`; unconscious wears
+  `red`.
+- **Hunger, thirst and drink.** `hungry`, `thirsty`, `tipsy` and the
+  rest lead the carry summary whenever they are anything but fine, and
+  disappear when you eat or drink.
+- **The hour.** The location row ends with the time of day —
+  `late evening` — from `World.Time`, which the package now asks for.
+
 ## v1.0.20 — 2026-09-03
 
 - **Special exits now reach rooms mapped before v1.0.19.** That release
