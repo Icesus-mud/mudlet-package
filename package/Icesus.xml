@@ -212,6 +212,10 @@ icesus.palette = {
   red      = "#f87171",
   amber    = "#fbbf24",
   cyan     = "#38bdf8",
+  -- Position on the banner when not standing (unconscious wears red).
+  posResting    = "#5eead4",
+  posSleeping   = "#818cf8",
+  posMeditating = "#c084fc",
   -- Gauge gradients (start, end). Match webclient .gauge-fill.* rules.
   -- Cold-pass: cooler stops across the board so the HUD reads as a
   -- frosted dashboard, not a candy-coloured one. HP / SP stay vivid
@@ -290,6 +294,13 @@ icesus.effectStyles = {
   ["chilled"]        = { fg = "#bae6fd", bg = "rgba(186,230,253,0.18)", bd = "rgba(186,230,253,0.40)" },
   ["blessed"]        = { fg = "#fde047", bg = "rgba(253,224,71,0.18)",  bd = "rgba(253,224,71,0.40)" },
   ["cursed"]         = { fg = "#c084fc", bg = "rgba(192,132,252,0.18)", bd = "rgba(192,132,252,0.40)" },
+  -- Bleeding wounds (Char.Status "wounds"), one entry per severity the
+  -- server names, amber to deep red as in the web client.
+  ["wound minor"]    = { fg = "#fbbf24", bg = "rgba(251,191,36,0.15)",  bd = "rgba(251,191,36,0.30)" },
+  ["wound nasty"]    = { fg = "#fb923c", bg = "rgba(251,146,60,0.15)",  bd = "rgba(251,146,60,0.30)" },
+  ["wound bad"]      = { fg = "#f87171", bg = "rgba(248,113,113,0.15)", bd = "rgba(248,113,113,0.30)" },
+  ["wound severe"]   = { fg = "#ef4444", bg = "rgba(239,68,68,0.18)",   bd = "rgba(239,68,68,0.40)" },
+  ["wound fatal"]    = { fg = "#dc2626", bg = "rgba(220,38,38,0.22)",   bd = "rgba(220,38,38,0.55)" },
   -- Concealment (Char.Status "stealth") shares this table so it can be
   -- restyled the same way, but wears cool, quiet colours: this is a
   -- state the player switched on, not bad news happening to them.
@@ -310,8 +321,15 @@ local function effectStyle(name)
   if not style and key:sub(1, 6) == "karma " then
     style = icesus.effectStyles.karma
   end
+  if not style and key:sub(1, 6) == "wound " then
+    style = icesus.effectStyles.bleeding
+  end
   return style or icesus.effectStyles.default
 end
+
+-- Severity order, so a row too narrow for one badge per wound can
+-- still colour its single BLEEDING badge by the worst of them.
+local WOUND_RANK = { minor = 1, nasty = 2, bad = 3, severe = 4, fatal = 5 }
 
 -- Concealment states, shortened for the combat column. Spelled out,
 -- "MOVING SILENTLY" and "HIDING IN SHADOWS" fill the badge row between
@@ -692,6 +710,8 @@ return {
     -- Karma badges share one entry; one karma on its own is
     -- ["karma exp"] = { fg = ... }.
     -- karma = { fg = "#fcd34d" },
+    -- Wound badges go by severity: minor, nasty, bad, severe, fatal.
+    -- ["wound fatal"] = { fg = "#ff4d4d" },
   },
 
   -- Guild readings beside the vitals gauges: fury, vitae, the active
@@ -902,11 +922,15 @@ icesus.state = {
   vitals          = { hp=0, hpmax=0, sp=0, spmax=0, ep=0, epmax=0,
                       psp=0, pspmax=0 },
   identity        = { name="", title="", race="", guild="", level=0 },
+  position        = "standing", -- "sleeping", "resting", "meditating", ...
   exp             = { exp=0, tnl=0, tna=0 },
   carry           = { money=0, bank=0, dfavor=0,
                       wt=0, wtmax=0, vol=0, volmax=0 },
+  needs           = { food="", water="", drunk="" },
+  time            = {},     -- World.Time as sent: hour_name, day, month, ...
   enemies         = {},
   effects         = {},
+  wounds          = {},     -- { { slot, severity, type, desc }, ... }
   stealth         = {},     -- concealment the player switched on
   karmas          = {},     -- karma the player spent on themselves
   cooldowns       = {},     -- { { name, remaining, total }, ... }
@@ -1630,6 +1654,18 @@ function icesus.refreshIdentity()
 
   local meta = {}
   if id.level and id.level > 0 then table.insert(meta, "Lvl " .. id.level) end
+  -- Anything but standing, right after the level: a long guild name
+  -- clips the end of this line, and this is the part that matters.
+  local pos = tostring(icesus.state.position or "standing")
+  if pos ~= "" and pos ~= "standing" then
+    local col = ({ resting    = P.posResting,
+                   sleeping   = P.posSleeping,
+                   meditating = P.posMeditating,
+                   unconscious = P.red })[pos] or P.textBright
+    table.insert(meta, string.format(
+      [[<span style="color:%s;font-weight:700">%s</span>]],
+      col, htmlEscape(pos:sub(1, 1):upper() .. pos:sub(2))))
+  end
   if race  ~= "" then table.insert(meta, htmlEscape(race))  end
   if guild ~= "" then table.insert(meta, htmlEscape(guild)) end
   local sep = string.format(
@@ -1668,6 +1704,19 @@ function icesus.refreshCarry()
   local P = icesus.palette
   local c = icesus.state.carry
   local parts = {}
+  -- Hunger, thirst and drink first, and only when they are not fine,
+  -- as on the web client's banner: absent is the good news.
+  local n = icesus.state.needs or {}
+  local function need(word, fine, col, style)
+    if word and word ~= "" and word ~= fine then
+      table.insert(parts, string.format(
+        [[<span style="color:%s;font-weight:600%s">%s</span>]],
+        col, style or "", htmlEscape(word)))
+    end
+  end
+  need(n.food,  "satiated",  P.red)
+  need(n.water, "refreshed", P.red)
+  need(n.drunk, "sober",     P.amber, ";font-style:italic")
   if c.money and c.money > 0 then
     table.insert(parts, string.format(
       [[<span style="color:#fbbf24;font-weight:600">%s sp</span>]],
@@ -1898,7 +1947,8 @@ function icesus.refreshEffects()
   local fx    = icesus.state.effects or {}
   local sneak = icesus.state.stealth or {}
   local karma = icesus.state.karmas  or {}
-  if #fx == 0 and #sneak == 0 and #karma == 0 then
+  local wnds  = icesus.state.wounds  or {}
+  if #fx == 0 and #sneak == 0 and #karma == 0 and #wnds == 0 then
     icesus.hud.effectsRow:echo(
       [[<center><span style="color:#555">no effects</span></center>]])
     return
@@ -1927,10 +1977,54 @@ function icesus.refreshEffects()
     local name = tostring(k)
     addPill(KARMA_MARK .. " " .. name, "karma " .. name:lower())
   end
-  for _, e in ipairs(fx) do addPill(e, e) end
+  -- Wounds stand where the bare BLEEDING badge would have, one per body
+  -- part: LEFT ARM NASTY. They say where the bleeding is, so that badge
+  -- would only repeat them, and keeping its place keeps them ahead of
+  -- whatever a crowded row loses off its end.
+  local woundsAt, woundsEnd
+  local function addWounds()
+    woundsAt = #pills + 1
+    for _, w in ipairs(wnds) do
+      local sev  = tostring(type(w) == "table" and w.severity or "minor"):lower()
+      local slot = tostring(type(w) == "table" and w.slot or "wound")
+      addPill(slot .. " " .. sev, "wound " .. sev)
+    end
+    woundsEnd = #pills
+  end
+  for _, e in ipairs(fx) do
+    if #wnds > 0 and tostring(e):lower() == "bleeding" then
+      if not woundsAt then addWounds() end
+    else
+      addPill(e, e)
+    end
+  end
+  if #wnds > 0 and not woundsAt then addWounds() end
+
+  -- A row that cannot hold every wound even at its tightest spacing
+  -- folds them into one BLEEDING badge with a count, in the colour of
+  -- the worst, so the shaving in fitBadges never leaves a row of
+  -- "LEFT…" stubs.
+  local cells = badgeCells()
+  if woundsAt then
+    local tightest = #pills - 1
+    for _, p in ipairs(pills) do tightest = tightest + p.cells + 2 end
+    if tightest > cells then
+      local worst, worstRank = "minor", 0
+      for _, w in ipairs(wnds) do
+        local sev = tostring(type(w) == "table" and w.severity or ""):lower()
+        if (WOUND_RANK[sev] or 0) > worstRank then
+          worst, worstRank = sev, WOUND_RANK[sev]
+        end
+      end
+      for i = woundsEnd, woundsAt, -1 do table.remove(pills, i) end
+      addPill(#wnds > 1 and ("bleeding \195\151" .. #wnds) or "bleeding",
+              "wound " .. worst)
+      table.insert(pills, woundsAt, table.remove(pills))
+    end
+  end
 
   local n        = #pills
-  local pad, gap = fitBadges(pills, badgeCells())
+  local pad, gap = fitBadges(pills, cells)
   local padStr   = string.rep("&nbsp;", pad)
   local gapStr   = string.rep("&nbsp;", gap)
 
@@ -2465,11 +2559,12 @@ function icesus.onStatus()
   local s = gmcp.Char and gmcp.Char.Status
   if not s then return end
 
-  -- identity (level can ride on Status)
+  -- identity (level and position ride on Status)
   if s.level ~= nil then
     icesus.state.identity.level = tonumber(s.level) or 0
-    icesus.refreshIdentity()
   end
+  if s.pos ~= nil then icesus.state.position = tostring(s.pos) end
+  if s.level ~= nil or s.pos ~= nil then icesus.refreshIdentity() end
 
   -- exp / tnl / tna
   if s.exp ~= nil or s.tnl ~= nil or s.tna ~= nil then
@@ -2488,8 +2583,13 @@ function icesus.onStatus()
   if s.max_wt    ~= nil then c.wtmax  = tonumber(s.max_wt)    or 0 end
   if s.carry_vol ~= nil then c.vol    = tonumber(s.carry_vol) or 0 end
   if s.max_vol   ~= nil then c.volmax = tonumber(s.max_vol)   or 0 end
+  local n = icesus.state.needs
+  if s.food  ~= nil then n.food  = tostring(s.food)  end
+  if s.water ~= nil then n.water = tostring(s.water) end
+  if s.drunk ~= nil then n.drunk = tostring(s.drunk) end
   if s.money ~= nil or s.dfavor ~= nil or s.carry_wt ~= nil
-     or s.max_wt ~= nil then
+     or s.max_wt ~= nil or s.food ~= nil or s.water ~= nil
+     or s.drunk ~= nil then
     icesus.refreshCarry()
   end
 
@@ -2528,6 +2628,7 @@ function icesus.onStatus()
   icesus.state.effects = (type(s.effects) == "table") and s.effects or {}
   icesus.state.stealth = (type(s.stealth) == "table") and s.stealth or {}
   icesus.state.karmas  = (type(s.karmas)  == "table") and s.karmas  or {}
+  icesus.state.wounds  = (type(s.wounds)  == "table") and s.wounds  or {}
   icesus.refreshEffects()
 
   -- Busy state (camping, smelting, fishing, etc.) — a non-spell action
@@ -2614,6 +2715,13 @@ function icesus.refreshRoom()
       [[<span style="color:%s;font-size:13pt">%s</span>]],
       P.textDim, htmlEscape(r.area)))
   end
+  -- The hour (World.Time), which the server sends when it changes.
+  local hour = icesus.state.time and icesus.state.time.hour_name
+  if type(hour) == "string" and hour ~= "" then
+    table.insert(left, string.format(
+      [[<span style="color:%s;font-size:13pt;font-style:italic">%s</span>]],
+      P.textDim, htmlEscape(hour)))
+  end
 
   local sep = string.format(
     [[<span style="color:%s">&nbsp;&middot;&nbsp;</span>]], P.borderBright)
@@ -2640,6 +2748,13 @@ function icesus.refreshRoom()
     .. [[<tr><td align="left">%s</td>]]
     .. [[<td align="right">%s</td></tr></table>]],
     table.concat(left, sep), exitText))
+end
+
+function icesus.onWorldTime()
+  local t = gmcp.World and gmcp.World.Time
+  if type(t) ~= "table" then return end
+  icesus.state.time = t
+  icesus.refreshRoom()
 end
 
 function icesus.onRoomInfo()
@@ -4420,7 +4535,7 @@ function icesus.subscribeGMCP()
         .. '"Char.Resources 1", '
         .. '"Char.EnemyDeath 1", '
         .. '"Comm 1", "Comm.Channel.Tell 1", "Comm.Channel.Text 1", '
-        .. '"Room 1", "Room.Info 1", "Room.Speech 1"]')
+        .. '"Room 1", "Room.Info 1", "Room.Speech 1", "World.Time 1"]')
 end
 
 -- =============================================================
@@ -4465,6 +4580,7 @@ function icesus.install()
   regFn("gmcp.Char.Resources",  "onResources")
   regFn("gmcp.Char.EnemyDeath", "onEnemyDeath")
   regFn("gmcp.Room.Info",            "onRoomInfo")
+  regFn("gmcp.World.Time",           "onWorldTime")
   regFn("gmcp.Room.Speech",          "onRoomSpeech")
   regFn("gmcp.Comm.Channel.Tell",    "onCommTell")
   regFn("gmcp.Comm.Channel.Text",    "onCommText")

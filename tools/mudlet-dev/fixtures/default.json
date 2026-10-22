@@ -53,6 +53,13 @@
       "effects":    ["bleeding", "stunned"],
       "stealth":    ["moving silently", "hiding in shadows"],
       "karmas":     ["exp", "luck"],
+      "wounds": [
+        { "slot": "left arm", "severity": "nasty", "type": "slashing",
+          "desc": "a nasty bleeding wound" }
+      ],
+      "food":       "hungry",
+      "water":      "refreshed",
+      "drunk":      "tipsy",
       "enemies": [
         { "name": "an orc warrior",  "hp": 60, "shape": "severely hurt"  },
         { "name": "an orc shaman",   "hp": 90, "shape": "slightly hurt"  },
@@ -72,6 +79,19 @@
       "exits": ["north", "east", "south", "west", "up"],
       "safe":  1,
       "id":    "abc12345"
+    }
+  },
+  {
+    "delay_ms": 50,
+    "package": "World.Time",
+    "payload": {
+      "hour_name":     "late evening",
+      "hour_position": "middle",
+      "day":           12,
+      "month":         "Frostmoon",
+      "season":        "winter",
+      "is_night":      1,
+      "phase":         "night"
     }
   },
   {

@@ -43,9 +43,12 @@ being negotiated — make sure GMCP is enabled in your profile settings.
 ## What's in the HUD
 
 **Top banner** (above the main console)
-- **Identity row** — name, level, race, guild from `Char.Base`.
+- **Identity row** — name, level, race, guild from `Char.Base`, and
+  right after the level whatever you are doing other than standing:
+  `Sleeping`, `Resting`, `Meditating`, `Unconscious` (`Char.Status.pos`).
 - **Carry summary** — money, divine favor, carry weight % from
-  `Char.Status`.
+  `Char.Status`, led by `hungry`, `thirsty`, `tipsy` and the like
+  whenever food, water or drink are anything but fine.
 - **EXP gauge** — full-width forest-green bar with current EXP and
   percent-to-next. At level 100 (cap), it switches to tracking
   progress toward your next advancement point.
@@ -63,8 +66,9 @@ being negotiated — make sure GMCP is enabled in your profile settings.
   type `hud guild` to print the rest to the console: bond load and
   drain, the soul list largest first, charm abilities, and your
   standing with the nine deities.
-- **Location & exits** — current room, area, a `SAFE` chip when
-  applicable, and the open exits as short cyan letters (`n e s w u`).
+- **Location & exits** — current room, area, the hour (`late evening`,
+  from `World.Time`), a `SAFE` chip when applicable, and the open exits
+  as short cyan letters (`n e s w u`).
 
 **Right column** (combat & comms)
 - **Momentum buttons** — clickable `BERSERK` / `EXECUTE`-style labels
@@ -86,6 +90,11 @@ being negotiated — make sure GMCP is enabled in your profile settings.
   Karma you spent on yourself — `☯ EXP`, `☯ LUCK`, … from
   `Char.Status.karmas` — follows in gold, for the same reason: chosen,
   not inflicted, and the badge disappearing is how you learn one lapsed.
+  Bleeding wounds take the place of the bare `BLEEDING` badge, one per
+  body part — `LEFT ARM NASTY`, `HEAD SEVERE` — amber for a minor one
+  through deep red for a fatal one (`Char.Status.wounds`). When there
+  are more than the row can hold, they fold into one `BLEEDING ×3` in
+  the colour of the worst.
   The row tightens its spacing and then shortens the longest names
   when it fills up, so a badge is never quietly drawn off the edge of
   the column.
@@ -369,8 +378,8 @@ return {
 | `config` | `hudSide`, `autoUpdate`, `borderTop`, `borderRight`, `borderBottom`, `channelLines`, `channelTimes`, `expMaxW` |
 | `fontSizes` | `identity`, `carry`, `exp`, `location`, `mapSave`, `vitals`, `momentum`, `cast`, `badges`, `enemy`, `channels` |
 | `chatStyle` | `time`, `channel`, `tell`, `speech`, `emote`, `talker`, `selfTalker`, `text`, `perChannel` |
-| `palette` | surfaces: `bgDeep`, `bgMain`, `bgPanel`, `bgInput`, `border`, `borderBright` · text: `text`, `textDim`, `textBright` · accents: `ice`, `iceBright`, `iceGlow`, `green`, `red`, `amber`, `cyan` · gauge gradients, each a `{ from, to }` pair: `hpGrad`, `hpGradC` (critical), `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` |
-| `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped. The concealment badges live here too, under their full server names: `["moving silently"]`, `["hiding in shadows"]`, `["invisible"]`. Karma badges share one `karma` entry; a single karma can be restyled under its own name, `["karma exp"]` |
+| `palette` | surfaces: `bgDeep`, `bgMain`, `bgPanel`, `bgInput`, `border`, `borderBright` · text: `text`, `textDim`, `textBright` · accents: `ice`, `iceBright`, `iceGlow`, `green`, `red`, `amber`, `cyan` · position on the banner: `posResting`, `posSleeping`, `posMeditating` (unconscious wears `red`) · gauge gradients, each a `{ from, to }` pair: `hpGrad`, `hpGradC` (critical), `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` |
+| `effectStyles` | one entry per effect name, each `{ fg = .., bg = .., bd = .. }`; new names are allowed, not just the ones shipped. The concealment badges live here too, under their full server names: `["moving silently"]`, `["hiding in shadows"]`, `["invisible"]`. Karma badges share one `karma` entry; a single karma can be restyled under its own name, `["karma exp"]`. Wound badges go by severity: `["wound minor"]`, `["wound nasty"]`, `["wound bad"]`, `["wound severe"]`, `["wound fatal"]` |
 | `guildStyles` | CSS colours for the guild readings beside the vitals gauges: `fury`, `vitae`, `charm`, the bond elements `air`, `water`, `fire`, `earth`, and `other` for a scalar the package has never heard of |
 
 Colours are Mudlet colour names in `chatStyle` (`lua showColors()`

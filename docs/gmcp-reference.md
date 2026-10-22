@@ -64,7 +64,7 @@ position, conditions, money, equipment, status effects.
   "level":   42,
   "exp":     153400,
   "tnl":     200000,
-  "pos":     "standing",        // sitting, sleeping, standing, …
+  "pos":     "standing",        // sleeping, resting, meditating, unconscious
   "state":   "combat",          // idle, combat, busy, …
   "food":    "satiated",
   "water":   "refreshed",
@@ -77,6 +77,10 @@ position, conditions, money, equipment, status effects.
   "carry_vol":  3200,
   "max_vol":   12000,
   "effects": ["bleeding", "stunned"],
+  "wounds": [                      // one per bleeding body part
+    { "slot": "left arm", "severity": "nasty",   // minor nasty bad severe fatal
+      "type": "slashing", "desc": "a nasty bleeding wound" }
+  ],
   "enemy":     "an orc warrior",   // legacy single-target
   "enemypct":  60,
   "enemies": [                     // multi-target — preferred
@@ -217,4 +221,15 @@ module can read+write them so triggers roam between clients.
 
 ## World.Time, Server.Status
 
-Game clock and server stats. Cosmetic widgets, low priority.
+Game clock and server stats. The HUD shows `World.Time.hour_name` on
+the location row; the server sends the packet at login and whenever the
+hour or the day phase changes.
+
+```
+// World.Time
+{
+  "hour_name": "late evening", "hour_position": "middle",
+  "day": 12, "month": "Frostmoon", "season": "winter",
+  "is_night": 1, "phase": "night"
+}
+```

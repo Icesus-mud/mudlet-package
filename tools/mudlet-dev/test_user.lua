@@ -1282,6 +1282,160 @@ do
 end
 
 -- ================================================================
+print("Wounds (Char.Status \"wounds\")")
+-- ================================================================
+
+local function wound(slot, severity)
+  return { slot = slot, severity = severity, type = "slashing",
+           desc = "a " .. severity .. " bleeding wound" }
+end
+
+do
+  local icesus, w = load_icesus()
+  local budget = math.floor((360 - 12) / (11 * 0.88))
+
+  local row = statusRow(icesus, w, { wounds = { wound("left arm", "nasty") } })
+  check("a wound alone lights the row up",
+    row:find("no effects", 1, true) == nil, row)
+  check("a wound names its body part and severity",
+    row:find("LEFT&nbsp;ARM&nbsp;NASTY", 1, true) ~= nil, row)
+  check("a nasty wound wears the nasty colour",
+    row:find("#fb923c", 1, true) ~= nil, row)
+
+  row = statusRow(icesus, w, { effects = { "bleeding", "stunned" },
+                               wounds  = { wound("left arm", "nasty") } })
+  check("the wound replaces the bare BLEEDING badge",
+    row:find("BLEEDING", 1, true) == nil and row:find("LEFT", 1, true) ~= nil, row)
+  check("other afflictions stay beside it",
+    row:find("STUNNED", 1, true) ~= nil, row)
+  check("the wound takes BLEEDING's place, ahead of what follows it",
+    (row:find("LEFT", 1, true) or 1e9) < (row:find("STUNNED", 1, true) or 0), row)
+
+  row = statusRow(icesus, w, { wounds = { wound("head", "minor"),
+                                          wound("left arm", "bad") } })
+  check("two wounds that fit keep a badge each",
+    row:find("HEAD&nbsp;MINOR", 1, true) ~= nil
+      and row:find("LEFT&nbsp;ARM&nbsp;BAD", 1, true) ~= nil, row)
+  check("and fit the column", rowCells(row) <= budget, tostring(rowCells(row)))
+
+  row = statusRow(icesus, w, { stealth = { "moving silently" },
+    wounds = { wound("left arm", "minor"), wound("right leg", "fatal"),
+               wound("torso", "bad"), wound("head", "nasty") } })
+  check("wounds that do not fit fold into one counted badge",
+    row:find("BLEEDING&nbsp;\195\1514", 1, true) ~= nil
+      and row:find("LEFT", 1, true) == nil, row)
+  check("the folded badge wears the worst wound's colour",
+    row:find("#dc2626", 1, true) ~= nil, row)
+  check("folding leaves the other badges whole",
+    row:find("SILENT", 1, true) ~= nil, row)
+  check("the folded row fits the column", rowCells(row) <= budget,
+    tostring(rowCells(row)))
+
+  row = statusRow(icesus, w, { effects = { "death sickness", "bleeding", "stunned" },
+    wounds = { wound("left arm", "minor"), wound("right leg", "severe"),
+               wound("torso", "bad") } })
+  check("a folded badge also keeps BLEEDING's place",
+    (row:find("DEATH", 1, true) or 1e9) < (row:find("BLEEDING", 1, true) or 0)
+      and (row:find("BLEEDING", 1, true) or 1e9) < (row:find("STUN", 1, true) or 0),
+    row)
+
+  row = statusRow(icesus, w, { effects = { "bleeding" } })
+  check("with the wounds gone a bleeding effect shows as before",
+    row:find("BLEEDING", 1, true) ~= nil and row:find("\195\151", 1, true) == nil, row)
+
+  row = statusRow(icesus, w, { wounds = "left arm" })
+  check("a non-table wounds field is ignored, not rendered",
+    row:find("no effects", 1, true) ~= nil, row)
+end
+
+do
+  local icesus, w = load_icesus({ user = [==[
+return {
+  effectStyles = { ["wound fatal"] = { fg = "#ff00ff" } },
+}
+]==] })
+  local row = statusRow(icesus, w, { wounds = { wound("head", "fatal") } })
+  check("a player can restyle a wound severity",
+    row:find("#ff00ff", 1, true) ~= nil, row)
+end
+
+-- ================================================================
+print("Position, hunger and the hour")
+-- ================================================================
+
+do
+  local icesus, w = load_icesus()
+  icesus.state.identity.race  = "elf"
+  icesus.state.identity.guild = "Wizards"
+  local function banner() return w.labels["icesus.identityLabel"] or "" end
+
+  statusRow(icesus, w, { level = 42, pos = "sleeping" })
+  check("sleeping shows on the banner", banner():find("Sleeping", 1, true) ~= nil,
+    banner())
+  check("in its own colour", banner():find(icesus.palette.posSleeping, 1, true) ~= nil,
+    banner())
+  check("ahead of race and guild, where a long guild cannot clip it",
+    (banner():find("Sleeping", 1, true) or 1e9) < (banner():find("elf", 1, true) or 0),
+    banner())
+
+  statusRow(icesus, w, { level = 42, pos = "unconscious" })
+  check("unconscious shows in red",
+    banner():find("Unconscious", 1, true) ~= nil
+      and banner():find(icesus.palette.red, 1, true) ~= nil, banner())
+
+  statusRow(icesus, w, { level = 42, pos = "standing" })
+  check("standing shows nothing",
+    banner():find("Standing", 1, true) == nil
+      and banner():find("Unconscious", 1, true) == nil, banner())
+end
+
+do
+  local icesus, w = load_icesus()
+  local function carry() return w.labels["icesus.carryLabel"] or "" end
+
+  statusRow(icesus, w, { money = 120, food = "hungry", water = "refreshed",
+                         drunk = "tipsy" })
+  check("hunger shows when it is not fine", carry():find("hungry", 1, true) ~= nil,
+    carry())
+  check("being drunk shows", carry():find("tipsy", 1, true) ~= nil, carry())
+  check("a refreshed thirst stays out of it",
+    carry():find("refreshed", 1, true) == nil, carry())
+  check("money is still there", carry():find("120 sp", 1, true) ~= nil, carry())
+
+  statusRow(icesus, w, { money = 120, food = "satiated", water = "thirsty",
+                         drunk = "sober" })
+  check("eating clears the hunger", carry():find("hungry", 1, true) == nil, carry())
+  check("thirst shows", carry():find("thirsty", 1, true) ~= nil, carry())
+  check("sober and satiated are never drawn",
+    carry():find("sober", 1, true) == nil
+      and carry():find("satiated", 1, true) == nil, carry())
+end
+
+do
+  local icesus, w = load_icesus()
+  local function loc() return w.labels["icesus.locationLabel"] or "" end
+  w.env.gmcp = { Room = { Info = { name = "Tavern Square", area = "Vaerlon",
+                                   exits = { north = "a1b2c3d4" } } } }
+  icesus.onRoomInfo()
+  check("no hour before the server sends one",
+    loc():find("font-style:italic", 1, true) == nil, loc())
+
+  w.env.gmcp = { World = { Time = { hour_name = "high noon", day = 3,
+                                    month = "Frostmoon", is_night = 0 } } }
+  icesus.onWorldTime()
+  check("the hour joins the location row", loc():find("high noon", 1, true) ~= nil,
+    loc())
+  check("after the area", (loc():find("Vaerlon", 1, true) or 1e9)
+    < (loc():find("high noon", 1, true) or 0), loc())
+
+  w.env.gmcp = { Room = { Info = { name = "North Gate", area = "Vaerlon",
+                                   exits = { south = "d4c3b2a1" } } } }
+  icesus.onRoomInfo()
+  check("and stays when you walk on", loc():find("high noon", 1, true) ~= nil
+    and loc():find("North Gate", 1, true) ~= nil, loc())
+end
+
+-- ================================================================
 print("Regression: the map settings layer is untouched")
 -- ================================================================
 do
