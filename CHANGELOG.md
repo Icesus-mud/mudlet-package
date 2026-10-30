@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.22 — 2026-10-30
+
+- **Hide the identity line or the EXP bar.** `hideIdentity = true` in
+  the `config` section of `Icesus.user.lua` leaves out the banner's
+  name, level, race and guild line, and the carry summary takes the
+  whole row. `hideExp = true` leaves out the EXP bar and gives its row
+  back to the main window. `hud example` lists both; `hud reload`
+  applies them.
+
 ## v1.0.21 — 2026-10-22
 
 - **Wounds.** Each bleeding body part gets its own badge in the effects
