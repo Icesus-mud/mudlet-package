@@ -111,7 +111,7 @@ icesus = icesus or {}
 -- package info; fall back to the literal for dev hot-reload from disk
 -- (when this file isn't loaded as an installed package yet).
 icesus.version = (getPackageInfo and getPackageInfo("Icesus")
-                  and getPackageInfo("Icesus").version) or "1.0.21"
+                  and getPackageInfo("Icesus").version) or "1.0.22"
 
 -- Hot-reload teardown.
 if type(icesus.teardown) == "function" then pcall(icesus.teardown) end
@@ -142,6 +142,11 @@ icesus.config = {
   -- EXP bar grows with the window but never sprawls past expMaxW so
   -- the value text stays close to the eye on widescreens.
   expMaxW      = 720,
+  -- Leave out the banner's name / level / race / guild line, or the EXP
+  -- bar, for a player who knows them already (issue 2233 on the game's
+  -- tracker). Hiding the EXP bar gives its row's height back.
+  hideIdentity = false,
+  hideExp      = false,
 }
 
 -- =============================================================
@@ -680,6 +685,8 @@ return {
   config = {
     -- borderRight  = 420,
     -- channelTimes = false,
+    -- hideIdentity = true,   -- no name / level / race / guild line
+    -- hideExp      = true,   -- no EXP bar; the banner gets shorter
   },
 
   -- Channel feed colours (Mudlet colour names). perChannel keys off
@@ -1033,6 +1040,8 @@ end
 -- =============================================================
 function icesus.hudLayout()
   local T = tonumber(icesus.config.borderTop)    or 92
+  -- The EXP row: a 32 px gauge and the 4 px gap above it.
+  if icesus.config.hideExp then T = math.max(0, T - 36) end
   local R = tonumber(icesus.config.borderRight)  or 360
   local B = tonumber(icesus.config.borderBottom) or 64
   local left = (icesus.config.hudSide == "left")
@@ -1073,6 +1082,7 @@ function icesus.setupHUD()
   local sig = table.concat({
     icesus.version, L.side, L.T, L.R, L.B,
     tostring(icesus.fontStack), tostring(icesus.fontSizes.channels),
+    tostring(icesus.config.hideIdentity),
   }, "|")
   if icesus.hud and icesus.hudSig == sig then return end
   if icesus.hud then icesus.teardownHUD() end
@@ -1123,6 +1133,10 @@ function icesus.setupHUD()
   local expH  = 32
 
   -- Identity (left half of banner row 1).
+  -- Left out with config.hideIdentity; the refresh then has no label to
+  -- write to and returns, and the carry summary takes the whole row.
+  local showId = not icesus.config.hideIdentity
+  if showId then
   icesus.hud.identityLabel = Geyser.Label:new({
     name = "icesus.identityLabel",
     x = PAD_H, y = 6, width = "60%-" .. (PAD_H * 2), height = idH,
@@ -1138,11 +1152,14 @@ function icesus.setupHUD()
   -- CSS font-size is silently ignored by Qt on some Mudlet builds.
   -- Geyser's setFontSize goes through QFont and always takes.
   pcall(function() icesus.hud.identityLabel:setFontSize(fsz("identity", 15)) end)
+  end
 
   -- Carry summary (right half of banner row 1).
   icesus.hud.carryLabel = Geyser.Label:new({
     name = "icesus.carryLabel",
-    x = "60%", y = 6, width = "40%-" .. PAD_H, height = idH,
+    x = showId and "60%" or PAD_H, y = 6,
+    width = showId and ("40%-" .. PAD_H) or ("100%-" .. (PAD_H * 2)),
+    height = idH,
   }, icesus.hud.banner)
   icesus.hud.carryLabel:setStyleSheet(string.format([[
     background: transparent;
@@ -1156,6 +1173,9 @@ function icesus.setupHUD()
 
   -- EXP gauge (banner row 2). Geyser.Gauge with forest gradient.
   -- Cap width on widescreens so the centred label stays near the eye.
+  -- Left out with config.hideExp; hudLayout() already took its row out
+  -- of borderTop, and the refresh returns with no gauge to fill.
+  if not icesus.config.hideExp then
   local expMax = icesus.config.expMaxW or 720
   local expW   = string.format("100%%-%d", PAD_H * 2)
   icesus.hud.expGauge = Geyser.Gauge:new({
@@ -1190,6 +1210,7 @@ function icesus.setupHUD()
   ]], P.textBright, FS))
   pcall(function() icesus.hud.expGauge.text:setFontSize(fsz("exp", 10)) end)
   icesus.hud.expGauge:setValue(0, 1, "EXP — / —")
+  end
 
   -- =====================================================================
   -- BOTTOM BAR — two strips, both anchored to the absolute bottom.

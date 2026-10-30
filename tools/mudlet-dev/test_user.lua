@@ -1436,6 +1436,34 @@ do
 end
 
 -- ================================================================
+print("Hiding the identity line and the EXP bar")
+-- ================================================================
+do
+  local icesus, w = load_icesus()
+  check("identity line built by default", icesus.hud.identityLabel ~= nil)
+  check("EXP bar built by default", icesus.hud.expGauge ~= nil)
+  check("banner keeps its height by default", w.borders.top == 92,
+    tostring(w.borders.top))
+
+  local hid, hw = load_icesus({ user =
+    "return { config = { hideIdentity = true, hideExp = true } }" })
+  check("hideIdentity loads without a warning", not warned(hid, "hideIdentity"))
+  check("hideIdentity: no identity label", hid.hud.identityLabel == nil)
+  check("hideExp: no EXP bar", hid.hud.expGauge == nil)
+  check("hideExp: banner gives the EXP row back", hw.borders.top == 56,
+    tostring(hw.borders.top))
+  check("carry summary still built", hid.hud.carryLabel ~= nil)
+  local ok, err = pcall(function() hid.refreshAll() end)
+  check("refresh runs with both hidden", ok, tostring(err))
+
+  local only, ow = load_icesus({ user =
+    "return { config = { hideExp = true } }" })
+  check("hideExp alone keeps the identity line", only.hud.identityLabel ~= nil)
+  check("hideExp alone: banner is shorter", ow.borders.top == 56,
+    tostring(ow.borders.top))
+end
+
+-- ================================================================
 print("Regression: the map settings layer is untouched")
 -- ================================================================
 do

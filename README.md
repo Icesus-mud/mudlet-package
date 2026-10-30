@@ -375,7 +375,7 @@ return {
 | Section | Keys |
 | --- | --- |
 | top level | `hudSide` (`"left"` / `"right"`), `fontStack` |
-| `config` | `hudSide`, `autoUpdate`, `borderTop`, `borderRight`, `borderBottom`, `channelLines`, `channelTimes`, `expMaxW` |
+| `config` | `hudSide`, `autoUpdate`, `borderTop`, `borderRight`, `borderBottom`, `channelLines`, `channelTimes`, `expMaxW`, `hideIdentity`, `hideExp` |
 | `fontSizes` | `identity`, `carry`, `exp`, `location`, `mapSave`, `vitals`, `momentum`, `cast`, `badges`, `enemy`, `channels` |
 | `chatStyle` | `time`, `channel`, `tell`, `speech`, `emote`, `talker`, `selfTalker`, `text`, `perChannel` |
 | `palette` | surfaces: `bgDeep`, `bgMain`, `bgPanel`, `bgInput`, `border`, `borderBright` · text: `text`, `textDim`, `textBright` · accents: `ice`, `iceBright`, `iceGlow`, `green`, `red`, `amber`, `cyan` · position on the banner: `posResting`, `posSleeping`, `posMeditating` (unconscious wears `red`) · gauge gradients, each a `{ from, to }` pair: `hpGrad`, `hpGradC` (critical), `spGrad`, `epGrad`, `pspGrad`, `expGrad`, `castGrad` |
