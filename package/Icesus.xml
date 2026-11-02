@@ -1772,11 +1772,15 @@ function icesus.refreshEnemies()
       [[<center><span style="color:#555">no targets</span></center>]])
     return
   end
-  -- Compose a stack of {name | bar | %} rows. The bar is rendered with
-  -- HTML block characters tinted by the enemy gradient — Qt's <table>
-  -- inside a Label keeps clean alignment.
+  -- Compose a stack of {name / bar / shape · %} rows. The bar is
+  -- rendered with HTML block characters tinted by the enemy gradient.
+  -- Everything sits flush left: a Label never wraps, so the table grows
+  -- to the longest name, and a right-aligned % would be pushed past the
+  -- panel's edge for every enemy once one name was too long (issue
+  -- Icesus-mud/issues#2292). The name is the only thing that clips.
   local rows = { [[<table width="100%" cellspacing="0" cellpadding="2" ]]
     .. [[style="font-family:monospace">]] }
+  local sep = [[&nbsp;&middot;&nbsp;]]
   for _, e in ipairs(enemies) do
     local pct  = tonumber(e.hp) or 0
     local col  = shapeColor(pct)
@@ -1784,18 +1788,21 @@ function icesus.refreshEnemies()
     local fill = math.floor(pct / 5)               -- out of 20
     local bar  = string.rep("&#9608;", fill)        -- █ blocks
     local rest = string.rep("&#9617;", 20 - fill)   -- ░ blocks
+    local desc = string.format(
+      [[<span style="font-style:normal">%d%%</span>]], pct)
+    if e.shape and e.shape ~= "" then
+      desc = htmlEscape(e.shape) .. sep .. desc
+    end
     table.insert(rows, string.format(
-      [[<tr><td style="color:%s;font-weight:600;padding-right:6px">%s</td>]]
-      .. [[<td style="color:%s;text-align:right;font-size:9pt">%d%%</td></tr>]]
-      .. [[<tr><td colspan="2" style="font-size:11pt;line-height:1.0">]]
+      [[<tr><td style="color:%s;font-weight:600">%s</td></tr>]]
+      .. [[<tr><td style="font-size:11pt;line-height:1.0">]]
       .. [[<span style="color:%s">%s</span>]]
       .. [[<span style="color:#1a1e35">%s</span></td></tr>]]
-      .. [[<tr><td colspan="2" style="color:%s;font-size:9pt;font-style:italic;]]
+      .. [[<tr><td style="color:%s;font-size:9pt;font-style:italic;]]
       .. [[padding-bottom:4px">%s</td></tr>]],
       P.textBright, name,
-      P.textDim,    pct,
       col, bar, rest,
-      P.textDim, htmlEscape(e.shape)))
+      P.textDim, desc))
   end
   table.insert(rows, "</table>")
   icesus.hud.enemyLabel:echo(table.concat(rows))

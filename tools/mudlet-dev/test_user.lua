@@ -1464,6 +1464,40 @@ do
 end
 
 -- ================================================================
+print("Enemy panel: the health % stays on the description line")
+-- ================================================================
+
+-- Feed one Char.Status and hand back what the enemy panel rendered.
+local function enemyPanel(icesus, w, status)
+  w.env.gmcp = { Char = { Status = status } }
+  icesus.onStatus()
+  return w.labels["icesus.enemyLabel"] or ""
+end
+
+do
+  local icesus, w = load_icesus()
+  local long = "Ghuatzskh, vile and enormous green dragon (poisoned, wounded)"
+  local out = enemyPanel(icesus, w, { enemies = {
+    { name = long,          hp = 10, shape = "gravely wounded" },
+    { name = "a dire wolf", hp = 40, shape = "badly wounded" },
+  } })
+  check("the % follows the health description",
+    out:find("gravely wounded&nbsp;&middot;&nbsp;"
+      .. [[<span style="font-style:normal">10%</span>]], 1, true) ~= nil, out)
+  check("every enemy keeps its %",
+    out:find("badly wounded&nbsp;&middot;&nbsp;"
+      .. [[<span style="font-style:normal">40%</span>]], 1, true) ~= nil, out)
+  check("nothing in the panel is right-aligned",
+    out:find("text-align:right", 1, true) == nil, out)
+  check("the long name is still shown", out:find(long, 1, true) ~= nil, out)
+
+  out = enemyPanel(icesus, w, { enemy = "an orc", enemypct = 55 })
+  check("a target without a description still shows its %",
+    out:find([[padding-bottom:4px"><span style="font-style:normal">55%</span>]],
+      1, true) ~= nil, out)
+end
+
+-- ================================================================
 print("Regression: the map settings layer is untouched")
 -- ================================================================
 do
