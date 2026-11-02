@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.23 — 2026-11-02
+
+- **The enemy's health % stays in sight.** It now follows the health
+  description under the bar, `gravely wounded · 10%`, instead of
+  sitting at the right end of the name line. There a long name or a
+  `(poisoned, wounded)` tag pushed it out of the panel, and since the
+  rows share one width, every other enemy's % went with it (issue
+  Icesus-mud/issues#2292).
+
 ## v1.0.22 — 2026-10-30
 
 - **Hide the identity line or the EXP bar.** `hideIdentity = true` in
